@@ -28,13 +28,7 @@ classdef RecModel < model.nlpmodel
         cstrJacOp; % opSpot for the Jacobian (constant, linear constraint)
         objSize; % number of variables
     end
-    
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    
-    methods (Abstract)
-       [xSol, tSol, solver] = Solve(self); 
-    end
-    
+
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
     methods (Access = public)

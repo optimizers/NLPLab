@@ -77,12 +77,16 @@ classdef NLPSolver < handle
       self.solve_time = Inf;
     end
 
-    function self = solve(self, varargin)
-      self.logger.error('solve', 'This class must be subclassed');
-      error('This class must be subclassed');
-    end
+%     function self = solve(self, varargin)
+%       self.logger.error('solve', 'This class must be subclassed');
+%       error('This class must be subclassed');
+%     end
 
   end  % methods
+  
+  methods (Abstract)
+     self = solve(self, varargin) 
+  end
 
 end  % classdef
 

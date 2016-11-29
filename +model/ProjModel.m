@@ -27,12 +27,6 @@ classdef ProjModel < model.nlpmodel
         % Internal parameters
         objSize; % Real object size according to GeoS object
     end
-    
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    
-    methods (Abstract)
-        [xSol, solver] = Solve(self, x);
-    end
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
@@ -162,6 +156,11 @@ classdef ProjModel < model.nlpmodel
         function xProj = dualToPrimal(self, zProj)
             %% Retrieving the original variable: x = \bar{x} + C'*z
             xProj = self.xbar + real(self.prec.Adjoint(zProj));
+        end
+        
+        function zProj = project(self, z)
+           %% Projects { z | zProj >= 0 } 
+           zProj = max(z, self.bL); % min(max(z, self.bL), self.bU)
         end
     end
 end
