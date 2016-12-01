@@ -180,7 +180,7 @@ classdef SPGSolver < solvers.NLPSolver
             self.time_total = tic;
             
             % Output Log
-            if self.verbose == 2
+            if self.verbose >= 2
                 % Printing header
                 self.printHeaderFooter('header');
                 if self.testOpt
@@ -200,7 +200,7 @@ classdef SPGSolver < solvers.NLPSolver
             self.iter = 1;
             
             % Evaluate Initial Point
-            x = self.project(self.x0);
+            x = self.project(self.nlp.x0);
             [f, g] = self.obj(x);
             
             self.stopTol = self.optTol * norm(g);
@@ -295,13 +295,13 @@ classdef SPGSolver < solvers.NLPSolver
                 if self.testOpt
                     pgnrm = norm(self.gpstep(x, g));
                     % Output Log with opt. cond.
-                    if self.verbose == 2
+                    if self.verbose >= 2
                         fprintf(self.LOG_BODY_OPT, self.iter, ...
                             self.nObjFunc, self.nProj, t, f, pgnrm);
                     end
                 else
                     % Output Log without opt. cond.
-                    if self.verbose == 2
+                    if self.verbose >= 2
                         fprintf(self.LOG_BODY, self.iter, ...
                             self.nObjFunc, self.nProj, t, f);
                     end
@@ -325,12 +325,11 @@ classdef SPGSolver < solvers.NLPSolver
                 if self.istop ~= 0
                     break;
                 end
-                
+                self.x = x;
+                self.fx = f;
+                self.proj_grad_norm = pgnrm;
                 self.iter = self.iter + 1;
             end
-            self.x = x;
-            self.fx = f;
-            self.proj_grad_norm = pgnrm;
             
             % -------------------------------------------------------------
             % END OF SOLVE
@@ -343,10 +342,11 @@ classdef SPGSolver < solvers.NLPSolver
                 self.printf('||Pg|| = %8.1e\n', self.proj_grad_norm);
                 self.printf('Stop tolerance = %8.1e\n', self.stopTol);
             end
-            if self.verbose == 2
+            if self.verbose >= 2
                 self.printHeaderFooter('footer');
             end
         end
+        
     end
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

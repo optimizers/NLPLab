@@ -67,6 +67,8 @@ classdef PQNSolver < solvers.NLPSolver
         stopTol;
     end
     
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    
     properties (Access = private, Hidden = false)
         % --- PQN parameters ---
         verbose; % 0, 1 or 2
@@ -93,6 +95,8 @@ classdef PQNSolver < solvers.NLPSolver
         SPGbbType; % Use Barzilai-Borwein step correction
         SPGmemory; % # previous vals to consider in non-monotone linesearch
     end
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
     properties (Hidden = true, Constant)
         EXIT_MSG = { ...
@@ -196,7 +200,7 @@ classdef PQNSolver < solvers.NLPSolver
             
             self.time_total = tic;
             
-            if self.verbose == 2
+            if self.verbose >= 2
                 self.printHeaderFooter('header');
                 self.printf(self.LOG_FORMAT, self.LOG_HEADER{:});
             end
@@ -369,7 +373,6 @@ classdef PQNSolver < solvers.NLPSolver
             self.x = x;
             self.fx = f;
             self.proj_grad_norm = pgnrm;
-            
             % -------------------------------------------------------------
             % End of solve
             % -------------------------------------------------------------
@@ -382,7 +385,11 @@ classdef PQNSolver < solvers.NLPSolver
                 self.printf('||Pg|| = %8.1e\n', self.proj_grad_norm);
                 self.printf('Stop tolerance = %8.1e\n', self.stopTol);
             end
+            if self.verbose >= 2
+                self.printHeaderFooter(self, 'footer');
+            end
         end
+        
     end
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -393,7 +400,7 @@ classdef PQNSolver < solvers.NLPSolver
             switch msg
                 case 'header'
                     % -----------------------------------------------------
-                    % Print header.
+                    % Print header
                     % -----------------------------------------------------
                     self.printf('\n');
                     self.printf('%s\n', ['*', repmat('-',1,58), '*']);
@@ -593,11 +600,13 @@ classdef PQNSolver < solvers.NLPSolver
                 lsIter = lsIter + 1;
             end
         end
+        
     end
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
     methods (Static, Access = private)
+        
         function Hv = lbfgsHvFunc2(v, Hdiag, N, M)
             %% Original function from the MinFunc folder
             % L-BFGS hessian-vector product
@@ -625,5 +634,6 @@ classdef PQNSolver < solvers.NLPSolver
                 Hdiag = ys / (y' * y);
             end
         end
+        
     end
 end
