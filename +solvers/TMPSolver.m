@@ -198,13 +198,13 @@ classdef TMPSolver < solvers.NLPSolver
             self.iter = 1;
             
             % Output Log
-            if self.verbose == 2
+            if self.verbose >= 2
                 self.printHeaderFooter('header');
                 self.printf(self.LOG_FORMAT, self.LOG_HEADER{:});
             end
             
             % Make sure initial point is feasible
-            x = self.project(self.x0);
+            x = self.project(self.nlp.x0);
             
             if strcmp(self.method, 'newton') || ...
                     strcmp(self.method, 'minres') || ...
@@ -384,14 +384,16 @@ classdef TMPSolver < solvers.NLPSolver
                 self.printf('||Pg|| = %8.1e\n', self.proj_grad_norm);
                 self.printf('Stop tolerance = %8.1e\n', self.stopTol);
             end
-            if self.verbose >= 2
-                self.printHeaderFooter('footer');
-            end
             
             self.nf = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
             self.ng = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
             self.nh = self.nlp.ncalls_hvp;
+            
+            if self.verbose >= 2
+                self.printHeaderFooter('footer');
+            end
         end
+        
     end
     
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
