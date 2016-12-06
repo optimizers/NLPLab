@@ -11,6 +11,8 @@ classdef ProjRecModel < model.RecModel
     %
     %   For additional information, look in the RecModel class.
     
+    
+    %% Properties
     properties (SetAccess = private, Hidden = false)
         % The model representing the projection problem
         projModel;
@@ -20,7 +22,10 @@ classdef ProjRecModel < model.RecModel
         projOptions;
     end
     
+    
+    %% Public methods
     methods (Access = public)
+        
         function self = ProjRecModel(crit, prec, sino, geos, projModel, ...
                 projSolver, projOptions, varargin)
             %% Constructor
@@ -84,5 +89,7 @@ classdef ProjRecModel < model.RecModel
             % Finding the primal variable from the dual variable
             z = self.projModel.dualToPrimal(zProj);
         end
+        
     end
+    
 end

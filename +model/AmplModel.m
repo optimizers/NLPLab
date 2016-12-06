@@ -1,4 +1,4 @@
-classdef amplmodel < model.nlpmodel
+classdef AmplModel < model.NlpModel
    
    properties (SetAccess = private, Hidden = true)
       ah              % ampl handle
@@ -11,7 +11,7 @@ classdef amplmodel < model.nlpmodel
 
    methods
 
-      function self = amplmodel(fname, sparse)
+      function self = AmplModel(fname, sparse)
          %AMPLMODEL Constructor.
          
          % Construct handle to either sparse or dense interface.
@@ -27,7 +27,7 @@ classdef amplmodel < model.nlpmodel
          nlc = ahl.nlc;
 
          % Instantiate the base class.
-         self = self@model.nlpmodel(name, ahl.x0, ahl.cl, ahl.cu, ahl.bl, ahl.bu);
+         self = self@model.NlpModel(name, ahl.x0, ahl.cl, ahl.cu, ahl.bl, ahl.bu);
          
          % Record sparsity flag
          self.sparse = sparse;

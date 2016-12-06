@@ -1,30 +1,31 @@
-classdef ShiftedQPModel < model.nlpmodel
-    %% ShiftedQPModel - Unconstrained shifted quadratic model
+classdef ShiftedQpModel < model.NlpModel
+    %% ShiftedQpModel - Unconstrained shifted quadratic model
     % This model is meant to be used in MinConf_PQN ONLY. It must receive a
-    % projection function, usually coming from the nlpmodel passed to
+    % projection function, usually coming from the NlpModel passed to
     % MinConf_PQN.
     %
-    % This model is a subclass of nlpmodel representing the following
+    % This model is a subclass of NlpModel representing the following
     % problem
     %       { min_d     c'*d +  0.5 * d'*Q*d : (unconstrained)
     % where d = p - x, x being the 'shift' applied on p
     
+    
+    %% Properties
     properties (Access = private, Hidden = false)
         x; % Shift vector
         c;
         Q; % Hessian
         
-        % Projection function coming from the external nlpmodel that this
+        % Projection function coming from the external NlpModel that this
         % model approximates
         projFun;
     end
     
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
+    %% Public methods
     methods (Access = public)
         
-        function self = ShiftedQPModel(name, x0, x, c, Q, projFun)
-            
+        function self = ShiftedQpModel(name, x0, x, c, Q, projFun)
             m = length(x0);
             m2 = length(x);
             if isempty(x0) || isempty(x)
@@ -39,7 +40,7 @@ classdef ShiftedQPModel < model.nlpmodel
             bL = cL;
             bU = cU;
             
-            self = self@model.nlpmodel(name, x0, cL, cU, bL, bU);
+            self = self@model.NlpModel(name, x0, cL, cU, bL, bU);
             
             % Store other things.
             self.x = x0;
@@ -95,4 +96,5 @@ classdef ShiftedQPModel < model.nlpmodel
         end
         
     end
+    
 end

@@ -1,5 +1,5 @@
-classdef CFlashModel < model.ProjRecModel
-    %% CFlashModel - Sovling reconstruction problem Cflash algorithm
+classdef CflashModel < model.ProjRecModel
+    %% CflashModel - Sovling reconstruction problem Cflash algorithm
     %   This class was developped to solve the problem represented by
     %   RecModel using the Cflash solver under NLPlab's framework.
     %
@@ -31,25 +31,26 @@ classdef CFlashModel < model.ProjRecModel
     %   RecModel.
     %   * For additional information about the projection sub-problem, see
     %   ProjModel.
-    %   ---
     
+    
+    %% Properties
     properties (SetAccess = private, Hidden = false)
-        % -- eqProject parameters --
+        % eqProject parameters
         C;
         CCt;
         eqProjMethod;
     end
     
-    properties (SetAccess = public)
+    properties (Access = public)
         % Norm of the jacobian (in our case preconditionner)
         normJac; % Used in relative tolerances
     end
     
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
+    %% Public methods
     methods (Access = public)
         
-        function self = CFlashModel(crit, prec, sino, geos, projModel, ...
+        function self = CflashModel(crit, prec, sino, geos, projModel, ...
                 projSolver, projOptions, varargin)
             %% Constructor
             % Inputs:
@@ -104,12 +105,8 @@ classdef CFlashModel < model.ProjRecModel
             
         end
         
-        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        %                   --- Cflash methods ---
         % The following methods are required in order for the Cflash
         % algorithm to be functional
-        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        
         function wProj = eqProject(self, wbar, ind)
             %% EqProject - project vector wbar on equality constraints
             % Solves the problem
@@ -213,7 +210,10 @@ classdef CFlashModel < model.ProjRecModel
         end
     end
     
+    
+    %% Private methods
     methods (Access = private)
+        
         function z = precMult(self, z, mode)
             %% Evaluates C * z
             if mode == 1
@@ -224,4 +224,5 @@ classdef CFlashModel < model.ProjRecModel
         end
         
     end
+    
 end
