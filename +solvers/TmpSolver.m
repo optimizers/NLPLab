@@ -68,8 +68,6 @@ classdef TmpSolver < solvers.NlpSolver
         pgNorm;
         % Exit flag
         iStop;
-        % Convergence flag
-        solved;
     end % gettable private propertie
     
     properties (Access = private, Hidden = false)
@@ -123,11 +121,9 @@ classdef TmpSolver < solvers.NlpSolver
             %   - varargin (optional): the various parameters of the
             %   algorithm
             
-            self = self@solvers.NlpSolver(nlp, varargin{:});
-            
             % Gathering optional arguments and setting default values
             p = inputParser;
-            p.KeepUnmatched = false;
+            p.KeepUnmatched = true;
             p.addParameter('verbose', 2);
             p.addParameter('maxEval', 5e2);
             p.addParameter('suffDec', 1e-4);
@@ -140,6 +136,8 @@ classdef TmpSolver < solvers.NlpSolver
             
             p.parse(varargin{:});
             
+            self = self@solvers.NlpSolver(nlp, p.Unmatched);
+                        
             self.verbose = p.Results.verbose;
             self.suffDec = p.Results.suffDec;
             self.maxIterLS = p.Results.maxIterLS;

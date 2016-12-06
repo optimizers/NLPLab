@@ -45,18 +45,10 @@ classdef SpgSolver < solvers.NlpSolver
     properties (SetAccess = private, Hidden = false)
         % Norm of projected gradient at x
         pgNorm;
-        % Iteration counter
-        iter;
-        % Execution time
-        solveTime;
         % Exit flag
         iStop;
-        % Convergence flag
-        solved;
         % Projection calls counter
         nProj;
-        % Objective function calls counter
-        nObjFunc;
     end % gettable private properties
     
     properties (Access = private, Hidden = false)
@@ -114,12 +106,10 @@ classdef SpgSolver < solvers.NlpSolver
             if ~ismethod(nlp, 'project')
                 error('nlp doesn''t contain a project method');
             end
-            
-            self = self@solvers.NlpSolver(nlp, varargin{:});
-            
+             
             % Gathering optional arguments and setting default values
             p = inputParser;
-            p.KeepUnmatched = false;
+            p.KeepUnmatched = true;
             p.addParameter('verbose', 2);
             p.addParameter('progTol', 1e-9);
             p.addParameter('maxEval', 5e2);
@@ -133,6 +123,8 @@ classdef SpgSolver < solvers.NlpSolver
             p.addParameter('maxIterLS', 10); % Max iters for linesearch
             
             p.parse(varargin{:});
+            
+            self = self@solvers.NlpSolver(nlp, p.Unmatched);
             
             self.verbose = p.Results.verbose;
             self.progTol = p.Results.progTol;

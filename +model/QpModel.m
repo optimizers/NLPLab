@@ -1,25 +1,25 @@
 classdef QpModel < model.NlpModel
-    % NlpModel where 
+    %% QpModel
     %   objectif is quadratic     : f(x) = c' * x + 1/2 x' * Q * x
     %   constraints are linear    : c(x) = A  * x
     
-   properties (SetAccess = private, Hidden = false)
-      A    % Jacobian of linear constraints
-      c    % Gradient of linear objectif
-      Q    % Hessien (symmetric)
-   end
+    
+    properties (SetAccess = private, Hidden = false)
+        A    % Jacobian of linear constraints
+        c    % Gradient of linear objectif
+        Q    % Hessien (symmetric)
+    end
+    
     
     methods (Sealed = true)
         
         function o = QpModel(name, x0, cL, cU, bL, bU, A, c, Q)
-            
+            %% Constructor
             o = o@model.NlpModel(name, x0, cL, cU, bL, bU);
-            
             % Store other things.
             o.A = A;
             o.c = c;
             o.Q = Q;
-            
             % In lpmodel, all constraints are linear
             o.linear = true(o.m, 1);
         end
@@ -48,15 +48,7 @@ classdef QpModel < model.NlpModel
             Hc = sparse(self.n, self.n);
         end
         
-        function H = hlag_local(self, ~, ~)
-            % Why??? This seems wrong...
-%             H = sparse(self.n, self.n);
-            H = self.Q;
-        end
-        
-        function w = hlagprod_local(self, ~, ~, v)
-            % Why?? This seems wrong...
-%             w = sparse(self.n, 1);
+        function w = hobjprod_local(self, ~, ~, v)
             w = self.Q * v;
         end
         
@@ -67,5 +59,7 @@ classdef QpModel < model.NlpModel
         function w = ghivprod_local(self, ~, ~, ~)
             w = sparse(self.n, 1);
         end
+        
     end
+    
 end
