@@ -1,5 +1,5 @@
-classdef SPGSolver < solvers.NLPSolver
-    %% SPGSolver - Calls the MinConf_SPG solver
+classdef SpgSolver < solvers.NlpSolver
+    %% SpgSolver - Calls the MinConf_SPG solver
     % Original documentation follows:
     % ---------------------------------------------------------------------
     % function [x,f,self.nObjFunc,self.nProj] = minConf_SPG(funObj,x,
@@ -41,41 +41,28 @@ classdef SPGSolver < solvers.NLPSolver
     %       - if the projection is expensive to compute, you can reduce the
     %           number of projections by setting self.testOpt to 0
     
+    
     properties (SetAccess = private, Hidden = false)
-        % Subclass of nlp model representing the problem to solve.
-        % Must contain the 'project' function; the projection of x on the
-        % constraint set.
-        nlp;
-        % x upon termination
-        x;
-        % Objective function value at x
-        fx;
         % Norm of projected gradient at x
-        proj_grad_norm;
+        pgNorm;
         % Iteration counter
         iter;
         % Execution time
-        time_total;
+        solveTime;
         % Exit flag
-        istop;
+        iStop;
         % Convergence flag
         solved;
         % Projection calls counter
         nProj;
         % Objective function calls counter
         nObjFunc;
-        % Tolerance relative to gradient norm
-        stopTol;
-        % Logger, logging4matlab required
-        log;
-    end
+    end % gettable private properties
     
     properties (Access = private, Hidden = false)
-        % -- Internal parameters --
+        % Internal parameters
         verbose; % 0, 1 or 2
-        optTol;
         progTol;
-        maxIter;
         maxEval;
         suffDec;
         memory;
@@ -83,9 +70,9 @@ classdef SPGSolver < solvers.NLPSolver
         projectLS;
         testOpt;
         bbType;
-        lsMaxIter;
+        maxIterLS;
         fid;
-    end
+    end % private properties
     
     properties (Hidden = true, Constant)
         LOG_HEADER = { ...
@@ -107,13 +94,12 @@ classdef SPGSolver < solvers.NLPSolver
             'Function value changing by less than progTol\n', ...       % 5
             'Function Evaluations exceeds maxEval\n', ...               % 6
             'Maximum number of iterations reached\n'};                  % 7
-    end
+    end % constant properties
     
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
     methods (Access = public)
         
-        function self = SPGSolver(nlp, varargin)
+        function self = SpgSolver(nlp, varargin)
             %% Constructor
             % Inputs:
             %   - nlp: a subclass of a nlp model containing the 'obj'
@@ -125,22 +111,17 @@ classdef SPGSolver < solvers.NLPSolver
             %   - varargin (optional): the various parameters of the
             %   algorithm
             
-            if ~isa(nlp, 'model.nlpmodel')
-                error('nlp should be a nlpmodel');
-            elseif ~ismethod(nlp, 'project')
+            if ~ismethod(nlp, 'project')
                 error('nlp doesn''t contain a project method');
             end
             
-            self = self@solvers.NLPSolver(nlp, varargin{:});
-            
-            self.nlp = nlp;
+            self = self@solvers.NlpSolver(nlp, varargin{:});
             
             % Gathering optional arguments and setting default values
             p = inputParser;
+            p.KeepUnmatched = false;
             p.addParameter('verbose', 2);
-            p.addParameter('optTol', 1e-5);
             p.addParameter('progTol', 1e-9);
-            p.addParameter('maxIter', 5e2);
             p.addParameter('maxEval', 5e2);
             p.addParameter('suffDec', 1e-4);
             p.addParameter('memory', 10);
@@ -149,17 +130,12 @@ classdef SPGSolver < solvers.NLPSolver
             p.addParameter('testOpt', 1);
             p.addParameter('bbType', 1);
             p.addParameter('fid', 1);
-            p.addParameter('lsMaxIter', 10); % Max iters for linesearch
-            % --- Logger ---
-            p.addParameter('loggerName', 'spgLogger')
-            p.addParameter('logLevel', logging.logging.INFO);
+            p.addParameter('maxIterLS', 10); % Max iters for linesearch
             
             p.parse(varargin{:});
             
             self.verbose = p.Results.verbose;
-            self.optTol = p.Results.optTol;
             self.progTol = p.Results.progTol;
-            self.maxIter = p.Results.maxIter;
             self.maxEval = p.Results.maxEval;
             self.suffDec = p.Results.suffDec;
             self.memory = p.Results.memory;
@@ -167,17 +143,14 @@ classdef SPGSolver < solvers.NLPSolver
             self.projectLS = p.Results.projectLS;
             self.testOpt = p.Results.testOpt;
             self.bbType = p.Results.bbType;
-            self.lsMaxIter = p.Results.lsMaxIter;
+            self.maxIterLS = p.Results.maxIterLS;
             self.fid = p.Results.fid;
-            self.log = logging.getLogger(p.Results.loggerName);
-            self.log.setCommandWindowLevel(p.Results.logLevel);
-            
-        end
+        end % constructor
         
         function self = solve(self)
             %% Solve using MinConf_SPG
             
-            self.time_total = tic;
+            self.solveTime = tic;
             
             % Output Log
             if self.verbose >= 2
@@ -193,7 +166,7 @@ classdef SPGSolver < solvers.NLPSolver
             end
             
             % Exit flag set to 0, will exit if not 0
-            self.istop = 0;
+            self.iStop = 0;
             % Resetting the counters
             self.nProj = 0;
             self.nObjFunc = 0;
@@ -203,52 +176,50 @@ classdef SPGSolver < solvers.NLPSolver
             x = self.project(self.nlp.x0);
             [f, g] = self.obj(x);
             
-            self.stopTol = self.optTol * norm(g);
+            self.rOptTol = self.aOptTol * norm(g);
             
             % Optionally check optimality
             pgnrm = 0;
             if self.testOpt
                 pgnrm = norm(self.gpstep(x, g));
-                if pgnrm < self.stopTol + self.optTol
-                    self.istop = 1; % will bypass main loop
+                if pgnrm < self.rOptTol + self.aOptTol
+                    self.iStop = 1; % will bypass main loop
                 end
             end
             
-            %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-            %                       --- Main loop ---
-            %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-            while self.istop == 0
+            %% Main loop
+            while self.iStop == 0
                 % Compute Step Direction
                 if self.iter == 1 || ~self.useSpectral
-                    alpha = 1;
+                    alph = 1;
                 else
-                    y = g - g_old;
-                    s = x - x_old;
+                    y = g - gOld;
+                    s = x - xOld;
                     if self.bbType == 1
-                        alpha = (s' * s) / (s' * y);
+                        alph = (s' * s) / (s' * y);
                     else
-                        alpha = (s' * y) / (y' * y);
+                        alph = (s' * y) / (y' * y);
                     end
-                    if alpha <= 1e-10 || alpha > 1e10 || isnan(alpha)
-                        alpha = 1;
+                    if alph <= 1e-10 || alph > 1e10 || isnan(alph)
+                        alph = 1;
                     end
                 end
                 
                 % Descent direction
-                d = -alpha * g;
-                f_old = f;
-                x_old = x;
-                g_old = g;
+                d = -alph * g;
+                fOld = f;
+                xOld = x;
+                gOld = g;
                 
                 % Compute Projected Step
                 if ~self.projectLS
-                    d = self.gpstep(x, -d); % project(x + d), d = -alpha*g
+                    d = self.gpstep(x, -d); % project(x + d), d = -alph*g
                 end
                 
                 % Check that Progress can be made along the direction
                 gtd = g' * d;
                 if gtd > -self.progTol * norm(g) * norm(d)
-                    self.istop = 2;
+                    self.iStop = 2;
                     % Leaving now saves some processing
                     break;
                 end
@@ -265,32 +236,32 @@ classdef SPGSolver < solvers.NLPSolver
                     funRef = f;
                 else
                     if self.iter == 1
-                        old_fvals = repmat(-inf, [self.memory 1]);
+                        fOldVals = repmat(-inf, [self.memory 1]);
                     end
                     if self.iter <= self.memory
-                        old_fvals(self.iter) = f;
+                        fOldVals(self.iter) = f;
                     else
-                        old_fvals = [old_fvals(2:end); f];
+                        fOldVals = [fOldVals(2:end); f];
                     end
-                    funRef = max(old_fvals);
+                    funRef = max(fOldVals);
                 end
                 
                 % Evaluate the Objective and Gradient at the Initial Step
                 if self.projectLS
-                    x_new = self.project(x + t * d);
+                    xNew = self.project(x + t * d);
                 else
-                    x_new = x + t * d;
+                    xNew = x + t * d;
                 end
                 
-                [f_new, g_new] = self.obj(x_new);
+                [fNew, gNew] = self.obj(xNew);
                 
-                [x_new, f_new, g_new, t, ~] = self.backtracking(x, ...
-                    x_new, f, f_new, g, g_new, d, t, funRef);
+                [xNew, fNew, gNew, t, ~] = self.backtracking(x, ...
+                    xNew, f, fNew, g, gNew, d, t, funRef);
                 
                 % Take Step
-                x = x_new;
-                f = f_new;
-                g = g_new;
+                x = xNew;
+                f = fNew;
+                g = gNew;
                 
                 if self.testOpt
                     pgnrm = norm(self.gpstep(x, g));
@@ -309,56 +280,51 @@ classdef SPGSolver < solvers.NLPSolver
                 
                 % Check optimality
                 if self.testOpt
-                    if pgnrm < self.stopTol + self.optTol
-                        self.istop = 3;
+                    if pgnrm < self.rOptTol + self.aOptTol
+                        self.iStop = 3;
                     end
                 elseif max(abs(t * d)) < self.progTol * norm(d)
-                    self.istop = 4;
-                elseif abs((f - f_old)/max([f_old, f, 1])) < self.progTol
-                    self.istop = 5;
+                    self.iStop = 4;
+                elseif abs((f - fOld)/max([fOld, f, 1])) < self.progTol
+                    self.iStop = 5;
                 elseif self.nObjFunc > self.maxEval
-                    self.istop = 6;
+                    self.iStop = 6;
                 elseif self.iter >= self.maxIter
-                    self.istop = 7;
+                    self.iStop = 7;
                 end
                 
-                if self.istop ~= 0
+                if self.iStop ~= 0
                     break;
                 end
                 self.x = x;
                 self.fx = f;
-                self.proj_grad_norm = pgnrm;
+                self.pgNorm = pgnrm;
                 self.iter = self.iter + 1;
-            end
+            end % main loop
             
-            % -------------------------------------------------------------
-            % END OF SOLVE
-            % -------------------------------------------------------------
-            self.solved = ~(self.istop == 6 || self.istop == 7);
-            self.time_total = toc(self.time_total);
+            %% End of solve
+            self.solved = ~(self.iStop == 6 || self.iStop == 7);
+            self.solveTime = toc(self.solveTime);
             if self.verbose
                 self.printf('\nEXIT SPG: %s\nCONVERGENCE: %d\n', ...
-                    self.EXIT_MSG{self.istop}, self.solved);
-                self.printf('||Pg|| = %8.1e\n', self.proj_grad_norm);
-                self.printf('Stop tolerance = %8.1e\n', self.stopTol);
+                    self.EXIT_MSG{self.iStop}, self.solved);
+                self.printf('||Pg|| = %8.1e\n', self.pgNorm);
+                self.printf('Stop tolerance = %8.1e\n', self.rOptTol);
             end
             if self.verbose >= 2
                 self.printHeaderFooter('footer');
             end
-        end
+        end % solve
         
-    end
+    end % public methods
     
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
     methods (Access = private)
         
         function printHeaderFooter(self, msg)
             switch msg
                 case 'header'
-                    % -----------------------------------------------------
                     % Print header
-                    % -----------------------------------------------------
                     self.printf('\n');
                     self.printf('%s\n', ['*', repmat('-',1,58), '*']);
                     self.printf([repmat('\t', 1, 3), 'MinConf_SPG \n']);
@@ -370,7 +336,7 @@ classdef SPGSolver < solvers.NLPSolver
                     self.printf('\t%-15s: %3s %8d\n', ' maxEval', '', ...
                         self.maxEval);
                     self.printf('%-15s: %3s %8.1e', 'optTol', '', ...
-                        self.optTol);
+                        self.aOptTol);
                     self.printf('\t%-15s: %3s %8d\n', ' useSpectral', ...
                         '', self.useSpectral);
                     self.printf('%-15s: %3s %8.1e', 'suffDec', '', ...
@@ -384,9 +350,7 @@ classdef SPGSolver < solvers.NLPSolver
                     self.printf('\n%15s: %3s %8s\n', 'Projection type', ...
                         '', class(self.nlp.projModel));
                 case 'footer'
-                    % -----------------------------------------------------
                     % Print footer
-                    % -----------------------------------------------------
                     self.printf('\n')
                     self.printf(' %-27s  %6i     %-17s  %15.8e\n', ...
                         'No. of iterations', self.iter, ...
@@ -400,7 +364,7 @@ classdef SPGSolver < solvers.NLPSolver
                         'No. of Hessian-vector prods', ...
                         self.nlp.ncalls_hvp);
                     self.printf('\n');
-                    tt = self.time_total;
+                    tt = self.solveTime;
                     t1 = self.nlp.time_fobj + self.nlp.time_fcon;
                     t1t = round(100 * t1/tt);
                     t2 = self.nlp.time_gobj + self.nlp.time_gcon;
@@ -414,8 +378,8 @@ classdef SPGSolver < solvers.NLPSolver
                         t1t, 'total solve', tt, 100);
                 otherwise
                     error('Unrecognized case in printHeaderFooter');
-            end
-        end
+            end % switch
+        end % printHeaderFooter
         
         function printf(self, varargin)
             %% Printf - prints variables arguments to a file
@@ -458,12 +422,12 @@ classdef SPGSolver < solvers.NLPSolver
             self.nProj = self.nProj + 1;
         end
         
-        function [x_new, f_new, g_new, t, failed] = backtracking(self, ...
-                x, x_new, f, f_new, g, g_new, d, t, funRef)
+        function [xNew, fNew, gNew, t, failed] = backtracking(self, ...
+                x, xNew, f, fNew, g, gNew, d, t, funRef)
             % Backtracking Line Search
             failed = false;
-            lsIter = 1;
-            while f_new > funRef + self.suffDec* g' * (x_new - x)
+            iterLS = 1;
+            while fNew > funRef + self.suffDec* g' * (xNew - x)
                 if self.verbose == 2
                     fprintf('Halving Step Size\n');
                 end
@@ -471,28 +435,30 @@ classdef SPGSolver < solvers.NLPSolver
                 
                 % Check whether step has become too small
                 if max(abs(t * d)) < self.progTol * norm(d) ...
-                        || t == 0 || lsIter > self.lsMaxIter
+                        || t == 0 || iterLS > self.maxIterLS
                     if self.verbose == 2
                         fprintf('Line Search failed\n');
                     end
                     failed = true;
                     t = 0;
-                    x_new = x;
-                    f_new = f;
-                    g_new = g;
+                    xNew = x;
+                    fNew = f;
+                    gNew = g;
                     return;
                 end
                 
                 if self.projectLS
                     % Projected linesearch
-                    x_new = self.project(x + t * d);
+                    xNew = self.project(x + t * d);
                 else
-                    x_new = x + t * d;
+                    xNew = x + t * d;
                 end
                 
-                [f_new, g_new] = self.obj(x_new);
-                lsIter = lsIter + 1;
+                [fNew, gNew] = self.obj(xNew);
+                iterLS = iterLS + 1;
             end
-        end
-    end
-end
+        end % backtracking
+        
+    end % private methods
+    
+end % class

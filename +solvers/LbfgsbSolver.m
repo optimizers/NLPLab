@@ -1,15 +1,14 @@
-classdef LBFGSBSolver < solvers.NLPSolver
-    %% LBFGSBSolver - Calls the L-BFGS-B MEX interface solver
+classdef LbfgsbSolver < solvers.NlpSolver
+    %% LbfgsbSolver - Calls the L-BFGS-B MEX interface solver
     % L-BFGS-B repository must be on MATLAB's path.
     % L-BFGS-B C++ MEX interface available at
     % https://bitbucket.org/polylion/optimization
     
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
     methods (Access = public)
         
-        function self = LBFGSBSolver(nlp, varargin)
-            self = self@solvers.NLPSolver(nlp, varargin{:});
+        function self = LbfgsbSolver(nlp, varargin)
+            self = self@solvers.NlpSolver(nlp, varargin{:});
         end
         
         function self = solve(self)
@@ -49,15 +48,17 @@ classdef LBFGSBSolver < solvers.NLPSolver
             fprintf('\nEXIT L-BFGS-B: %s\n', self.stop_reason);
             fprintf('||Pg|| = %8.1e\n', self.proj_grad_norm);
         end
-    end
+        
+    end % public methods
     
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
     methods (Access = private)
+        
         function [x, g, p] = objSupp(self, x, p)
             %% Calling ProjModel's obj function and returning p
-            [x, g] = self.nlp.obj(x);
+            [x, g] = self.nlp.obj(x);    
         end
-    end
+        
+    end % private methods
     
-end
+end % class

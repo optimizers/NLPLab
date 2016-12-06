@@ -1,4 +1,4 @@
-classdef ProjModel < model.nlpmodel
+classdef ProjModel < model.NlpModel
     %% ProjModel - Custom model representing the projection problem
     %   This class represents the DUAL of the projection sub-problem:
     %
@@ -19,17 +19,18 @@ classdef ProjModel < model.nlpmodel
     %   This model is only compatible with the structure of the tomographic
     %   reconstruction algorithm made by Poly-LION. The preconditionner
     %   should be a Precond object.
-    %   ---
-    
+
+
+    %% Properties
     properties (SetAccess = private, Hidden = false)
         % Storing the objects representing the problem
         prec; % The preconditionner used, identity = none
         % Internal parameters
         objSize; % Real object size according to GeoS object
     end
-
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
+    
+    %% Public methods
     methods (Access = public)
         
         function self = ProjModel(prec, geos)
@@ -53,24 +54,20 @@ classdef ProjModel < model.nlpmodel
             end
             
             % Initial lagrange multiplier
-            z0 = zeros(objSiz, 1); % Watch out, z0 becomes x0 in nlpmodel
+            z0 = zeros(objSiz, 1); % Watch out, z0 becomes x0 in NlpModel
             % Upper and lower bounds of the projection problem
             bU = inf(objSiz, 1);
             bL = zeros(objSiz, 1);
             
-            % Calling the nlpmodel superclass (required for bcflash)
-            self = self@model.nlpmodel('', z0, [], [], bL, bU);
+            % Calling the NlpModel superclass (required for bcflash)
+            self = self@model.NlpModel('', z0, [], [], bL, bU);
             
             % Initializing input parameters
             self.prec = prec;
             self.objSize = objSiz;
         end
         
-        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        %               --- Projection problem functions ---
         % Override NLP model's default functions
-        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        
         function [fObj, grad, hess] = obj(self, z)
             %% Function returning the obj. func, grad. and hess.
             % min   1/2 || C'z + \bar{x} ||^2
@@ -162,5 +159,7 @@ classdef ProjModel < model.nlpmodel
            %% Projects { z | zProj >= 0 } 
            zProj = max(z, self.bL); % min(max(z, self.bL), self.bU)
         end
+        
     end
+    
 end

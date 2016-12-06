@@ -10,22 +10,23 @@ classdef PdcooModel < model.RecModel
     %   by a Critere object, whereas the preconditionner should be a 
     %   Precond object. This model also expects the sinogram to be a 
     %   Sinogramme object and the geos a GeometrieSeries object.
-    %   ---
-    
+
+
+    %% Properties
     properties (SetAccess = private, Hidden = false)
         xSol;
         options;
     end
     
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
+    %% Public methods
     methods (Access = public)
         
         function self = PdcooModel(crit, prec, sino, geos, options, ...
                 mu0, name)
             %% Constructor
             % Verifying if the name and mu0 fields exist (required for
-            % nlpmodel constructor in RecModel)
+            % NlpModel constructor in RecModel)
             if nargin < 6
                 mu0 = [];
                 name = '';
@@ -121,5 +122,7 @@ classdef PdcooModel < model.RecModel
             xSol = xSol(~solver.slack.islack);
             self.xSol = xSol;
         end
+        
     end
+    
 end

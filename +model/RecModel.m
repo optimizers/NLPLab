@@ -1,4 +1,4 @@
-classdef RecModel < model.nlpmodel
+classdef RecModel < model.NlpModel
     %% RecModel - Model representing the the reconstruction problem
     %   This class was developped to represent the following problem
     %
@@ -17,8 +17,9 @@ classdef RecModel < model.nlpmodel
     %   the preconditionner should be a Precond object. This model also
     %   expects the sinogram to be a Sinogramme object and the geos a
     %   GeometrieSeries object.
-    %   ---
     
+    
+    %% Properties
     properties (SetAccess = private, Hidden = false)
         % Storing the object representing the problem
         crit; % Contains terms representing the objective function
@@ -28,9 +29,9 @@ classdef RecModel < model.nlpmodel
         cstrJacOp; % opSpot for the Jacobian (constant, linear constraint)
         objSize; % number of variables
     end
-
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
+    
+    %% Public methods
     methods (Access = public)
         
         function self = RecModel(crit, prec, sino, geos, mu0, name)
@@ -96,8 +97,8 @@ classdef RecModel < model.nlpmodel
             bL = -inf(objSiz, 1);
             bU = inf(objSiz, 1);   
             
-            % Calling the nlpmodel superclass (required for PDCOO & Cflash)
-            self = self@model.nlpmodel(name, x0, cL, cU, bL, bU);
+            % Calling the NlpModel superclass (required for PDCOO & Cflash)
+            self = self@model.NlpModel(name, x0, cL, cU, bL, bU);
             
             % Constraints are linear
             self.linear = true(self.m, 1);
@@ -121,11 +122,7 @@ classdef RecModel < model.nlpmodel
             self.cstrJacOp = opFunction(self.objSize, self.objSize, jWrap);
         end
         
-        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        %                --- Problem functions ---
-        % Override the default nlpmodel methods
-        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        
+        % Override the default NlpModel methods
         function [f, g, H] = obj(self, x)
             %% Evaluates the obj. func, the gradient and the hessian
             % The number of output arguments is set by the user.
@@ -255,5 +252,7 @@ classdef RecModel < model.nlpmodel
             %% Computes the hessian of the constraints times vector
             w = sparse(self.objSize, 1);
         end
+        
     end
+    
 end

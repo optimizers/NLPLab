@@ -1,5 +1,5 @@
-classdef TMPSolver < solvers.NLPSolver
-    %% TMPSolver - Calls the MinConf_TMP solver
+classdef TmpSolver < solvers.NlpSolver
+    %% TmpSolver - Calls the MinConf_TMP solver
     % An object oriented framework based on the original minConf solver
     % available at: https://www.cs.ubc.ca/~schmidtm/Software/minConf.html
     %
@@ -56,47 +56,28 @@ classdef TMPSolver < solvers.NLPSolver
     %   options:
     %       verbose: level of verbosity (0: no output, 1: final, 2: iter
     %       (default), 3: debug)
-    %       optTol: tolerance used to check for progress (default: 1e-7)
+    %       aOptTol: tolerance used to check for progress (default: 1e-7)
     %       maxIter: maximum number of calls to funObj (default: 250)
     %       numDiff: compute derivatives numerically (0: use user-supplied
     %       derivatives (default), 1: use finite differences, 2: use
     %       complex differentials)
     
+    
     properties (SetAccess = private, Hidden = false)
-        % Subclass of nlp model representing the problem to solve
-        nlp;
-        % x upon termination
-        x;
-        % Objective function value at x
-        fx;
         % Norm of the projected gradient at x
-        proj_grad_norm;
-        % Iteration counter
-        iter;
-        % Execution time
-        time_total;
+        pgNorm;
         % Exit flag
-        istop;
+        iStop;
         % Convergence flag
         solved;
-        % Number of calls to the objective function
-        nObjFunc;
-        % Tolerance relative to gradient norm
-        stopTol;
-        
-        nf;
-        ng;
-        nh;
-    end
+    end % gettable private propertie
     
     properties (Access = private, Hidden = false)
-        % -- Internal parameters --
+        % Internal parameters
         verbose; % 0, 1 or 2
-        optTol;
-        maxIter;
         maxEval; % Maximum number of objective function evaluations
         suffDec;
-        lsMaxIter; % Maximal number of iterations during linesearch
+        maxIterLS; % Maximal number of iterations during linesearch
         method; % How to compute the descent direction
         corrections; % L-BFGS
         damped; % L-BFGS
@@ -104,7 +85,7 @@ classdef TMPSolver < solvers.NLPSolver
         descDirTol; % Tolerance on computation of descent direction
         fid;
         krylOpts;
-    end
+    end % private properties
     
     properties (Hidden = true, Constant)
         LOG_HEADER = {'Iteration','FunEvals', 'Step Length', ...
@@ -116,21 +97,21 @@ classdef TMPSolver < solvers.NLPSolver
             ' progress is possible at initial point\n'], ...            % 1
             ['All working variables satisfy optimality condition at', ...
             ' initial point\n'], ...                                    % 2
-            'Directional derivative below optTol\n', ...                % 3
+            'Directional derivative below aOptTol\n', ...                % 3
             ['All variables are at their bound and no further', ...
             ' progress is possible\n'], ...                             % 4
             'All working variables satisfy optimality condition\n', ... % 5
-            'Step size below optTol\n', ...                             % 6
-            'Function value changing by less than optTol\n', ...        % 7
+            'Step size below aOptTol\n', ...                             % 6
+            'Function value changing by less than aOptTol\n', ...        % 7
             'Function Evaluations exceeds maxEval\n', ...              % 8
             'Maximum number of iterations reached\n'                    % 9
             };
-    end
+    end % constant properties
     
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
     methods (Access = public)
-        function self = TMPSolver(nlp, varargin)
+        
+        function self = TmpSolver(nlp, varargin)
             %% Constructor
             % Inputs:
             %   - nlp: a subclass of a nlp model containing the 'obj'
@@ -142,33 +123,26 @@ classdef TMPSolver < solvers.NLPSolver
             %   - varargin (optional): the various parameters of the
             %   algorithm
             
-            if ~isa(nlp, 'model.nlpmodel')
-                error('nlp should be a nlpmodel');
-            end
-            
-            self = self@solvers.NLPSolver(nlp, varargin{:});
+            self = self@solvers.NlpSolver(nlp, varargin{:});
             
             % Gathering optional arguments and setting default values
             p = inputParser;
+            p.KeepUnmatched = false;
             p.addParameter('verbose', 2);
-            p.addParameter('optTol', 1e-6);
-            p.addParameter('maxIter', 5e2);
             p.addParameter('maxEval', 5e2);
             p.addParameter('suffDec', 1e-4);
             p.addParameter('method', 'pcg');
             p.addParameter('corrections', 7);
             p.addParameter('damped', 0);
             p.addParameter('fid', 1);
-            p.addParameter('lsMaxIter', 50); % Max iters for linesearch
+            p.addParameter('maxIterLS', 50); % Max iters for linesearch
             p.addParameter('descDirTol', 1e-10);
             
             p.parse(varargin{:});
             
             self.verbose = p.Results.verbose;
-            self.optTol = p.Results.optTol;
-            self.maxIter = p.Results.maxIter;
             self.suffDec = p.Results.suffDec;
-            self.lsMaxIter = p.Results.lsMaxIter;
+            self.maxIterLS = p.Results.maxIterLS;
             self.method = p.Results.method;
             self.corrections = p.Results.corrections;
             self.damped = p.Results.damped;
@@ -182,7 +156,7 @@ classdef TMPSolver < solvers.NLPSolver
                 self.krylOpts.show = false;
                 self.krylOpts.check = false;
             end
-        end
+        end % constructor
         
         function self = solve(self)
             %% Solve
@@ -190,10 +164,10 @@ classdef TMPSolver < solvers.NLPSolver
             % as an argument to the constructor. Computes the descent
             % direction according to the 'method' parameter.
             
-            self.time_total = tic;
+            self.solveTime = tic;
             
             % Setting counters and exit flag, will exit if not 0
-            self.istop = 0;
+            self.iStop = 0;
             self.nObjFunc = 0;
             self.iter = 1;
             
@@ -217,12 +191,10 @@ classdef TMPSolver < solvers.NLPSolver
                 % Checking if hessian is symmetric
                 y = ones(self.nlp.n, 1);
                 w = H * y;
-                r2 = H * w;
-                s = w' * w;
-                t = y' * r2;
-                z = abs(s - t);
+                t = y' * H * w; % y' * H * H * y
+                s = w' * w; % y' * H' * H * y
                 epsa = (s + eps) * eps^(1/3);
-                if z > epsa
+                if abs(s - t) > epsa
                     error(['Can''t use that method because hessian is', ...
                         ' not symmetric']);
                 end
@@ -236,7 +208,7 @@ classdef TMPSolver < solvers.NLPSolver
                     ' direction (self.method)']);
             end
             
-            self.stopTol = self.optTol * norm(g);
+            self.rOptTol = self.aOptTol * norm(g);
             
             % Compute working set (inactive constraints)
             working = self.working(x, g);
@@ -244,17 +216,14 @@ classdef TMPSolver < solvers.NLPSolver
             % Early optimality check - if true won't enter loop
             pgnrm = norm(g(working));
             if isempty(working)
-                self.istop = 1;
-            elseif pgnrm <= self.stopTol + self.optTol
-                self.istop = 2;
+                self.iStop = 1;
+            elseif pgnrm <= self.rOptTol + self.aOptTol
+                self.iStop = 2;
             end
-            %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-            %                       --- Main loop ---
-            %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-            while self.istop == 0
-                % ---
+            
+            %% Main loop
+            while self.iStop == 0
                 % Compute step direction
-                % ---
                 d = zeros(self.nlp.n, 1);
                 switch self.method
                     case 'sd'
@@ -275,33 +244,33 @@ classdef TMPSolver < solvers.NLPSolver
                         if self.iter == 1
                             % First iteration is steepest descent
                             d(working) = -g(working);
-                            old_dirs = zeros(self.nlp.n, 0);
-                            old_stps = zeros(self.nlp.n, 0);
+                            oldDirs = zeros(self.nlp.n, 0);
+                            oldStps = zeros(self.nlp.n, 0);
                             Hdiag = 1;
                         else
-                            [d, old_dirs, old_stps, Hdiag] = ...
-                                self.lbfgsDescDir(d, x, x_old, g, ...
-                                g_old, working, old_dirs, old_stps, Hdiag);
+                            [d, oldDirs, oldStps, Hdiag] = ...
+                                self.lbfgsDescDir(d, x, xOld, g, ...
+                                gOld, working, oldDirs, oldStps, Hdiag);
                         end
-                        g_old = g;
-                        x_old = x;
+                        gOld = g;
+                        xOld = x;
                     case 'bfgs'
                         if self.iter == 1
                             % First iteration is steepest descent
                             d(working) = -g(working);
                             B = speye(self.nlp.n);
                         else
-                            [d, B] = self.bfgsDescDir(d, x, x_old, g, ...
-                                g_old, B, working);
+                            [d, B] = self.bfgsDescDir(d, x, xOld, g, ...
+                                gOld, B, working);
                         end
-                        g_old = g;
-                        x_old = x;
+                        gOld = g;
+                        xOld = x;
                 end
                 
                 % Check that progress can be made along the direction
                 gtd = g' * d;
-                if gtd > -self.optTol * norm(g) * norm(d)
-                    self.istop = 3;
+                if gtd > -self.aOptTol * norm(g) * norm(d)
+                    self.iStop = 3;
                     % Leave now
                     break;
                 end
@@ -314,26 +283,24 @@ classdef TMPSolver < solvers.NLPSolver
                 
                 % Evaluate the objective and projected gradient at the
                 % initial step
-                x_new = self.project(x + t * d);
-                [f_new, g_new] = self.obj(x_new);
+                xNew = self.project(x + t * d);
+                [fNew, gNew] = self.obj(xNew);
                 
-                % ---
                 % Check sufficient decrease condition and do a linesearch
-                % ---
-                f_old = f;
-                [x_new, f_new, g_new, t, lsFailed] = self.backtracking( ...
-                    x, x_new, f, f_new, g, g_new, t, d);
+                fOld = f;
+                [xNew, fNew, gNew, t, failLS] = self.backtracking( ...
+                    x, xNew, f, fNew, g, gNew, t, d);
                 
                 % Take Step
-                x = x_new;
-                f = f_new;
-                g = g_new;
+                x = xNew;
+                f = fNew;
+                g = gNew;
                 
                 % Compute Working Set
                 working = self.working(x, g);
                 
                 % If necessary, compute Hessian
-                if secondOrder && ~lsFailed
+                if secondOrder && ~failLS
                     [~, ~, H] = self.obj(x);
                 end
                 
@@ -348,64 +315,60 @@ classdef TMPSolver < solvers.NLPSolver
                 
                 % Checking various stopping conditions, exit if true
                 if isempty(working)
-                    self.istop = 4;
-                elseif pgnrm <= self.stopTol + self.optTol
-                    self.istop = 5;
+                    self.iStop = 4;
+                elseif pgnrm <= self.rOptTol + self.aOptTol
+                    self.iStop = 5;
                     % Check for lack of progress
-                elseif sum(abs(t * d)) < self.optTol * norm(d)
-                    self.istop = 6;
-                elseif abs((f - f_old)/max([f_old, f, 1])) < self.optTol
-                    self.istop = 7;
+                elseif sum(abs(t * d)) < self.aOptTol * norm(d)
+                    self.iStop = 6;
+                elseif abs((f - fOld)/max([fOld, f, 1])) < self.aFeasTol
+                    self.iStop = 7;
                 elseif self.nObjFunc > self.maxEval
-                    self.istop = 8;
+                    self.iStop = 8;
                 elseif self.iter >= self.maxIter
-                    self.istop = 9;
+                    self.iStop = 9;
                 end
                 
-                if self.istop ~= 0
+                if self.iStop ~= 0
                     break;
                 end
                 
                 self.iter = self.iter + 1;
-            end
+            end % main loop
+            
             self.x = x;
             self.fx = f;
-            self.proj_grad_norm = pgnrm;
+            self.pgNorm = pgnrm;
             
-            % -------------------------------------------------------------
-            % End of solve
-            % -------------------------------------------------------------
-            self.time_total = toc(self.time_total);
-            self.solved = ~(self.istop == 8 || self.istop == 9);
+            %% End of solve
+            self.solveTime = toc(self.solveTime);
+            self.solved = ~(self.iStop == 8 || self.iStop == 9);
             
             if self.verbose
                 self.printf('\nEXIT TMP: %s\nCONVERGENCE: %d\n', ...
-                    self.EXIT_MSG{self.istop}, self.solved);
-                self.printf('||Pg|| = %8.1e\n', self.proj_grad_norm);
-                self.printf('Stop tolerance = %8.1e\n', self.stopTol);
+                    self.EXIT_MSG{self.iStop}, self.solved);
+                self.printf('||Pg|| = %8.1e\n', self.pgNorm);
+                self.printf('Stop tolerance = %8.1e\n', self.rOptTol);
             end
             
-            self.nf = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
-            self.ng = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
-            self.nh = self.nlp.ncalls_hvp;
+            self.nObjFunc = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
+            self.nGrad = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
+            self.nHess = self.nlp.ncalls_hvp;
             
             if self.verbose >= 2
                 self.printHeaderFooter('footer');
             end
-        end
+        end % solve
         
-    end
+    end % public methods
     
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     
     methods (Access = private)
         
         function printHeaderFooter(self, msg)
             switch msg
                 case 'header'
-                    % -----------------------------------------------------
                     % Print header
-                    % -----------------------------------------------------
                     self.printf('\n');
                     self.printf('%s\n', ['*', repmat('-',1,58), '*']);
                     self.printf([repmat('\t', 1, 3), 'MinConf_TMP \n']);
@@ -414,21 +377,19 @@ classdef TMPSolver < solvers.NLPSolver
                     self.printf('\nParameters\n----------\n')
                     self.printf('%-15s: %3s %8i', 'maxIter', '', self.maxIter);
                     
-                    self.printf('\t%-15s: %3s %8.1e\n', ' optTol', '', ...
-                        self.optTol);
+                    self.printf('\t%-15s: %3s %8.1e\n', ' aOptTol', '', ...
+                        self.aOptTol);
                     self.printf('%-15s: %3s %8.1e', 'suffDec', '', ...
                         self.suffDec);
-                    self.printf('\t%-15s: %3s %8d\n', ' lsMaxIter', '', ...
-                        self.lsMaxIter);
+                    self.printf('\t%-15s: %3s %8d\n', ' maxIterLS', '', ...
+                        self.maxIterLS);
                     self.printf('%-15s: %3s %8s', 'method', '', self.method);
                     self.printf('\t%-15s: %3s %8d\n', ' corrections', '', ...
                         self.corrections);
                     self.printf('%-15s: %3s %8d', 'damped', '', self.damped);
                     self.printf('\n');
                 case 'footer'
-                    % -----------------------------------------------------
                     % Print footer
-                    % -----------------------------------------------------
                     self.printf('\n')
                     self.printf(' %-27s  %6i     %-17s  %15.8e\n', ...
                         'No. of iterations', self.iter, ...
@@ -441,7 +402,7 @@ classdef TMPSolver < solvers.NLPSolver
                     self.printf(' %-27s  %6i \n', ...
                         'No. of Hessian-vector prods', self.nlp.ncalls_hvp);
                     self.printf('\n');
-                    tt = self.time_total;
+                    tt = self.solveTime;
                     t1 = self.nlp.time_fobj + self.nlp.time_fcon;
                     t1t = round(100 * t1/tt);
                     t2 = self.nlp.time_gobj + self.nlp.time_gcon;
@@ -455,8 +416,8 @@ classdef TMPSolver < solvers.NLPSolver
                         'total solve', tt, 100);
                 otherwise
                     error('Unrecognized case in printHeaderFooter');
-            end
-        end
+            end % switch
+        end % printHeaderFooter
         
         function printf(self, varargin)
             %% Printf - prints variables arguments to a file
@@ -494,47 +455,47 @@ classdef TMPSolver < solvers.NLPSolver
             x = self.project(x - g) - x;
         end
         
-        function [x_new, f_new, g_new, t, failed] = backtracking(self, ...
-                x, x_new, f, f_new, g, g_new, t, d)
+        function [xNew, fNew, gNew, t, failed] = backtracking(self, ...
+                x, xNew, f, fNew, g, gNew, t, d)
             %% Backtracking Line Search
             % Applies an interpolation procedure (half step) if the new
             % value doesn't improve the value of the objective function.
             
-            lsIters = 1;
+            iterLS = 1;
             failed = false;
             % Check if decrease is sufficient
-            while f_new > f + self.suffDec * g' * (x_new - x)
+            while fNew > f + self.suffDec * g' * (xNew - x)
                 if self.verbose == 2
                     fprintf('Halving Step Size\n');
                 end
                 t = 0.5 * t;
                 
                 % Check whether step has become too small
-                if (sum(abs(t * d)) < self.optTol * norm(d)) || ...
-                        (lsIters > self.lsMaxIter)
+                if (sum(abs(t * d)) < self.aOptTol * norm(d)) || ...
+                        (iterLS > self.maxIterLS)
                     if self.verbose == 3
                         fprintf('Line Search failed\n');
                     end
                     % Return original x, f and g values
                     t = 0;
-                    x_new = x;
-                    f_new = f;
-                    g_new = g;
+                    xNew = x;
+                    fNew = f;
+                    gNew = g;
                     failed = true;
                     return;
                 end
                 
                 % Evaluate new point
-                x_new = self.project(x + t * d);
+                xNew = self.project(x + t * d);
                 % Evaluate objective function and gradient at new point
-                [f_new, g_new] = self.obj(x_new);
-                lsIters = lsIters + 1;
+                [fNew, gNew] = self.obj(xNew);
+                iterLS = iterLS + 1;
             end
-        end
+        end % backtracking
         
-        function [d, old_dirs, old_stps, Hdiag] = ...
-                lbfgsDescDir(self, d, x, x_old, g, g_old, working, ...
-                old_dirs, old_stps, Hdiag)
+        function [d, oldDirs, oldStps, Hdiag] = ...
+                lbfgsDescDir(self, d, x, xOld, g, gOld, working, ...
+                oldDirs, oldStps, Hdiag)
             %% LBFGSDescDir - descent direction computed using L-BFGS
             % Inputs:
             %   - d: descent direction that has to be updated.
@@ -548,44 +509,42 @@ classdef TMPSolver < solvers.NLPSolver
             %   - d: updated descent direction.
             %   - Various L-BFGS variables are passed as output in order to
             %   keep a handle on them:
-            %       > old_dirs,
-            %       > old_stps,
+            %       > oldDirs,
+            %       > oldStps,
             %       > Hdiag
             
-            % ***
-            % All of this is done in MATLAB!
-            % ***
+            % * All of this is done in MATLAB! *
             
             if self.damped
                 % Updating hessian approximation using damped L-BFGS
-                [old_dirs, old_stps, Hdiag] = dampedUpdate( ...
-                    g - g_old, x - x_old, self.corrections, ...
-                    self.verbose == 2, old_dirs, old_stps, Hdiag);
+                [oldDirs, oldStps, Hdiag] = dampedUpdate( ...
+                    g - gOld, x - xOld, self.corrections, ...
+                    self.verbose == 2, oldDirs, oldStps, Hdiag);
             else
                 % Updating hessian approximation using L-BFGS
-                [old_dirs, old_stps, Hdiag] = lbfgsUpdate(g - g_old, ...
-                    x - x_old, self.corrections, ...
-                    old_dirs, old_stps, Hdiag);
+                [oldDirs, oldStps, Hdiag] = lbfgsUpdate(g - gOld, ...
+                    x - xOld, self.corrections, ...
+                    oldDirs, oldStps, Hdiag);
             end
             
             % Curvature criteria must remain greater than 0
-            curvSat = sum(old_dirs(working, :) .* ...
-                old_stps(working, :)) > 1e-10;
+            curvSat = sum(oldDirs(working, :) .* ...
+                oldStps(working, :)) > 1e-10;
             
             % Computing d = -H^-1 * g, where H is the L-BFGS hessian approx
-            d(working) = lbfgs(-g(working), old_dirs(working, ...
-                curvSat), old_stps(working, curvSat), Hdiag);
-        end
+            d(working) = lbfgs(-g(working), oldDirs(working, ...
+                curvSat), oldStps(working, curvSat), Hdiag);
+        end % lbfgsDescDir
         
-        function [d, B] = bfgsDescDir(self, d, x, x_old, ...
-                g, g_old, B, working)
+        function [d, B] = bfgsDescDir(self, d, x, xOld, ...
+                g, gOld, B, working)
             %% BFGSDescDir - descent direction computed using BFGS
             % Inputs:
             %   - d: descent direction that has to be updated.
             %   - x: current point.
-            %   - x_old: old point.
+            %   - xOld: old point.
             %   - g: current value of the graident.
-            %   - g_old: old gradient.
+            %   - gOld: old gradient.
             %   - B: BFGS approximation of the hessian
             %   - working: logical array representing the current active
             %   constraints.
@@ -593,8 +552,8 @@ classdef TMPSolver < solvers.NLPSolver
             %   - d: updated descent direction.
             %   - B: updated BFGS approximation of the hessian
             
-            y = g - g_old;
-            s = x - x_old;
+            y = g - gOld;
+            s = x - xOld;
             
             ys = y'*s;
             
@@ -615,7 +574,7 @@ classdef TMPSolver < solvers.NLPSolver
             
             % Updating descent direction
             d(working) = -B(working, working) \ g(working);
-        end
+        end % bfgsDescDir
         
         function [d, H] = newtonDescDir(self, d, g, H, working)
             %% NewtonDescDir - descent direction computed using Newton step
@@ -647,48 +606,44 @@ classdef TMPSolver < solvers.NLPSolver
                     min(real(eig(H(working, working)))));
                 d(working) = -H(working,working) \ g(working);
             end
-        end
+        end % newtonDescDir
         
         function working = working(self, x, g)
             %% Working - compute set of 'working' variables
             % true  = variable didn't reach its bound and can be improved
             working = true(self.nlp.n, 1);
-            working((x < self.nlp.bL + self.optTol*2) & g >= 0) = false;
-            working((x > self.nlp.bU - self.optTol*2) & g <= 0) = false;
+            working((x < self.nlp.bL + self.aOptTol*2) & g >= 0) = false;
+            working((x > self.nlp.bU - self.aOptTol*2) & g <= 0) = false;
         end
         
-    end
+    end % private methods
     
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    
-    % ---------------------------------------------------------------------
-    % Below are found the original L-BFGS update, hessian-vector product,
+    % Below are defined the original L-BFGS update, hessian-vector product,
     % and hessian inverse functions found in the MinFunc folder of the
     % MinConf package.
-    % ---------------------------------------------------------------------
-    
     methods (Static, Access = private)
+        
         function Hv = lbfgsHvFunc2(v, Hdiag, N, M)
             %% Original function from the MinFunc folder
             % L-BFGS hessian-vector product
             Hv = v / Hdiag - N * (M \ (N' * v));
         end
         
-        function [old_dirs, old_stps, Hdiag] = lbfgsUpdate(y, s, corr, ...
-                old_dirs, old_stps, Hdiag)
+        function [oldDirs, oldStps, Hdiag] = lbfgsUpdate(y, s, corr, ...
+                oldDirs, oldStps, Hdiag)
             %% Original function from the MinFunc folder
             % Limited memory BFGS hessian update
             ys = y' * s;
             if ys > 1e-10
-                numCorrections = size(old_dirs, 2);
-                if numCorrections < corr
+                nCorr = size(oldDirs, 2);
+                if nCorr < corr
                     % Full Update
-                    old_dirs(:, numCorrections + 1) = s;
-                    old_stps(:, numCorrections + 1) = y;
+                    oldDirs(:, nCorr + 1) = s;
+                    oldStps(:, nCorr + 1) = y;
                 else
                     % Limited-Memory Update
-                    old_dirs = [old_dirs(:, 2:corr), s];
-                    old_stps = [old_stps(:, 2:corr), y];
+                    oldDirs = [oldDirs(:, 2:corr), s];
+                    oldStps = [oldStps(:, 2:corr), y];
                 end
                 
                 % Update scale of initial Hessian approximation
@@ -696,14 +651,14 @@ classdef TMPSolver < solvers.NLPSolver
             end
         end
         
-        function [old_dirs, old_stps, Hdiag] = dampedUpdate(y, s, corr, ...
-                old_dirs, old_stps, Hdiag)
+        function [oldDirs, oldStps, Hdiag] = dampedUpdate(y, s, corr, ...
+                oldDirs, oldStps, Hdiag)
             %% Original function from the MinFunc folder
             % Compute damped update in case curvature condition is not met
             % and hessian is not positive definite.
             
-            S = old_dirs(:, 2:end);
-            Y = old_stps(:, 2:end);
+            S = oldDirs(:, 2:end);
+            Y = oldStps(:, 2:end);
             k = size(Y, 2);
             L = zeros(k);
             for j = 1:k
@@ -720,25 +675,25 @@ classdef TMPSolver < solvers.NLPSolver
             Bs = s / Hdiag - N * (M \ (N' * s)); % Product B*s
             sBs = s' * Bs;
             
-            eta = .02;
+            eta = 0.02;
             if ys < eta * sBs
                 theta = min(max(0, ((1 - eta) * sBs) / (sBs - ys)), 1);
                 y = theta * y + (1 - theta) * Bs;
             end
             
-            nCorr = size(old_dirs, 2);
+            nCorr = size(oldDirs, 2);
             if nCorr < corr
                 % Full Update
-                old_dirs(:, nCorr + 1) = s;
-                old_stps(:, nCorr + 1) = y;
+                oldDirs(:, nCorr + 1) = s;
+                oldStps(:, nCorr + 1) = y;
             else
                 % Limited-Memory Update
-                old_dirs = [old_dirs(:, 2:corr), s];
-                old_stps = [old_stps(:, 2:corr), y];
+                oldDirs = [oldDirs(:, 2:corr), s];
+                oldStps = [oldStps(:, 2:corr), y];
             end
             % Update scale of initial Hessian approximation
             Hdiag = (y' * s) / (y' * y);
-        end
+        end % dampedUpdate
         
         function d = lbfgs(g, s, y, Hdiag)
             %% Original function from the MinFunc folder
@@ -780,7 +735,8 @@ classdef TMPSolver < solvers.NLPSolver
                 r(:, i + 1) = r(:, i) + s(:, i) * (al(i) - be(i));
             end
             d = r(:, k + 1);
-        end
+        end % lbfgs
         
-    end
-end
+    end % static private methods
+    
+end % class

@@ -1,4 +1,4 @@
-classdef slackmodelnn < model.nlpmodel
+classdef SlackModelNn < model.NlpModel
    % SLACKMODEL  Equality constraints with bounds.
    %
    % Derives the following slack formulation
@@ -39,7 +39,7 @@ classdef slackmodelnn < model.nlpmodel
       
       %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
       
-      function self = slackmodelnn(nlp)
+      function self = SlackModelNn(nlp)
 
          m = nlp.m;
          n = nlp.n;
@@ -113,7 +113,7 @@ classdef slackmodelnn < model.nlpmodel
          % --------------------------------------------------------------------
          % Instantiate from the base class.
          % --------------------------------------------------------------------
-         self = self@model.nlpmodel(nlp.name, x0, cL, cU, bL, bU);
+         self = self@model.NlpModel(nlp.name, x0, cL, cU, bL, bU);
 
          % --------------------------------------------------------------------
          % Identify the linear constraints.

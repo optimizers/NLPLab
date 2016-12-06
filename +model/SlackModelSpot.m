@@ -1,6 +1,5 @@
-classdef slackmodel_spot < model.nlpmodel
-    % sous entend que le nlpmodel d entr�e � un gradient des contraintes
-    % de type opSpot
+classdef SlackModelSpot < model.NlpModel
+    %% SlackModelSpot
 
     properties
       nlp    % original inequality-based object
@@ -11,7 +10,7 @@ classdef slackmodel_spot < model.nlpmodel
 
    methods
 
-      function self = slackmodel_spot(nlp)
+      function self = SlackModelSpot(nlp)
 
          constraints_I = find(nlp.cL ~= nlp.cU);
          nI = size(constraints_I, 1);
@@ -32,7 +31,7 @@ classdef slackmodel_spot < model.nlpmodel
          x0 = [ nlp.x0; c(constraints_I) ];
 
          % Instantiate from the base class.
-         self = self@model.nlpmodel(nlp.name, x0, cL, cU, bL, bU);
+         self = self@model.NlpModel(nlp.name, x0, cL, cU, bL, bU);
 
          % Identify the linear constraints.
          self.linear = nlp.linear;
@@ -54,8 +53,8 @@ classdef slackmodel_spot < model.nlpmodel
           %% Evaluate obj. func., gradient and hessian of original model
           % Call obj on the model that has been slacked first, that way the
           % function can be redefined. If it's not, it's still going to end
-          % up to nlpmodel's obj function, assuming self.nlp comes from a
-          % subclass of nlpmodel.
+          % up to NlpModel's obj function, assuming self.nlp comes from a
+          % subclass of NlpModel.
           if nargout == 1
               % Nothing special to do, call slack fobj_local
               f = self.fobj_local(xs);
