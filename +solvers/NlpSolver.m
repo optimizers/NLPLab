@@ -11,10 +11,6 @@ classdef NlpSolver < handle
         aCompTol   % absolute stopping tolerance on complementarity
         maxIter    % maximum number of iterations
         gradCheck  % activate gradient checker
-        iter        % current iteration count
-        logger      % logger object
-        status      % status after solve
-        solveTime  % cpu time to complete the solve
     end % gettable private properties
     
     properties (Access = public)
@@ -27,6 +23,10 @@ classdef NlpSolver < handle
         nObjFunc; % # of obj func calls
         nGrad; % # of gradient calls
         nHess; % # of hessian calls
+        solveTime  % cpu time to complete the solve
+        status      % status after solve
+        iter        % current iteration count
+        logger      % logger object
     end
     
     properties (Hidden = true, Constant)
@@ -48,8 +48,8 @@ classdef NlpSolver < handle
             %% Constructor
             
             % Verifying that nlp is a subclass of nlpmodel
-            if ~isa(nlp, 'model.nlpmodel')
-                error('nlp should be a nlpmodel');
+            if ~isa(nlp, 'model.NlpModel')
+                error('nlp should be a NlpModel');
             end
             self.nlp = nlp;
             

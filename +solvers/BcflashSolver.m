@@ -15,10 +15,7 @@ classdef BcflashSolver < solvers.NlpSolver
     
     properties (SetAccess = private, Hidden = true)
         mu0            % sufficient decrease parameter
-        gTol
         cgTol
-        aFeasTol          % absoulte error in function
-        rFeasTol          % relative error in function
         fMin
         fid            % File ID of where to direct log output
     end % hidden gettable private properties
@@ -59,22 +56,22 @@ classdef BcflashSolver < solvers.NlpSolver
         
         function self = BcflashSolver(nlp, varargin)
             %% Constructor
-            self = self@solvers.NlpSolver(nlp, varargin{:});
             
             % Parse input parameters and initialize local variables
             p = inputParser;
-            p.KeepUnmatched = false;
+            p.KeepUnmatched = true;
             p.addParameter('maxCgIter', length(nlp.x0));
             p.addParameter('cgTol', 0.1);
-            p.addParameter('gTol', 1e-5);
             p.addParameter('fMin', -1e32);
             p.addParameter('mu0', 0.01);
-            p.addParameter('verbose', 1);
+            p.addParameter('verbose', 2);
             p.addParameter('fid', 1);
+            
             p.parse(varargin{:});
             
+            self = self@solvers.NlpSolver(nlp, p.Unmatched);
+            
             % Store various objects and parameters
-            self.gTol = p.Results.gTol;
             self.cgTol = p.Results.cgTol;
             self.maxCgIter = p.Results.maxCgIter;
             self.fMin = p.Results.fMin;
@@ -87,7 +84,7 @@ classdef BcflashSolver < solvers.NlpSolver
             %% Solve
             self.solveTime = tic;
             % Make sure initial point is feasible
-            x = bcflash.mid(self.nlp.x0, self.nlp.bL, self.nlp.bU);
+            x = solvers.BcflashSolver.mid(self.nlp.x0, self.nlp.bL, self.nlp.bU);
             
             % First objective and gradient evaluation.
             f = self.nlp.fobj(x);
@@ -97,7 +94,7 @@ classdef BcflashSolver < solvers.NlpSolver
             gNorm = norm(g);
             delta = gNorm;
             self.gNorm0 = gNorm;
-            self.rOptTol = self.gTol * gNorm;
+            self.rOptTol = self.aOptTol * gNorm;
             
             % Actual and predicted reductions. Initial inf value prevents
             % exits based on related on first iter.
@@ -115,7 +112,7 @@ classdef BcflashSolver < solvers.NlpSolver
             %% Main loop
             while true
                 % Check stopping conditions
-                pgNorm = bcflash.gpnrm2(x, self.nlp.bL, self.nlp.bU, g);
+                pgNorm = solvers.BcflashSolver.gpnrm2(x, self.nlp.bL, self.nlp.bU, g);
                 exit = pgNorm <= self.rOptTol;
                 if ~self.iStop && exit
                     self.iStop = self.EXIT_OPTIMAL;
@@ -228,11 +225,11 @@ classdef BcflashSolver < solvers.NlpSolver
             
             %% End of solve
             self.solveTime = toc(self.solveTime);
-            self.solved = ~(self.istop == 2 || self.istop == 6);
+            self.solved = ~(self.iStop == 2 || self.iStop == 6);
             
             if self.verbose
                 self.printf('\nEXIT bcflash: %s\nCONVERGENCE: %d\n', ...
-                    self.EXIT_MSG{self.istop}, self.solved);
+                    self.EXIT_MSG{self.iStop}, self.solved);
                 self.printf('||Pg|| = %8.1e\n', self.pgNorm);
                 self.printf('Stop tolerance = %8.1e\n', self.rOptTol);
             end
@@ -272,8 +269,8 @@ classdef BcflashSolver < solvers.NlpSolver
                     self.printf('%-15s: %3s %8.1e', 'cgTol', '', ...
                         self.cgTol);
                     self.printf('%5s', '');
-                    self.printf('%-15s: %3s %8.1e\n', 'gTol', '', ...
-                        self.gTol);
+                    self.printf('%-15s: %3s %8.1e\n', 'aOptTol', '', ...
+                        self.aOptTol);
                     self.printf('%-15s: %3s %8.1e', 'mu0', '', self.mu0);
                     self.printf('\n');
                 case 'footer'
@@ -340,11 +337,11 @@ classdef BcflashSolver < solvers.NlpSolver
             bU = self.nlp.bU;
             
             % Find the minimal and maximal break-point on x - alph*g.
-            [~, ~, brptMax] = bcflash.breakpt(x, -g, bL, bU);
+            [~, ~, brptMax] = solvers.BcflashSolver.breakpt(x, -g, bL, bU);
             
             % Evaluate the initial alph and decide if the algorithm
             % must interpolate or extrapolate.
-            s = bcflash.gpstep(x, -alph, g, bL, bU);
+            s = solvers.BcflashSolver.gpstep(x, -alph, g, bL, bU);
             
             if norm(s) >= delta
                 interp = true;
@@ -366,7 +363,7 @@ classdef BcflashSolver < solvers.NlpSolver
                     % will be replaced in future versions of the code.
                     alph = interpf*alph;
                     
-                    s = bcflash.gpstep(x, -alph, g, bL, bU);
+                    s = solvers.BcflashSolver.gpstep(x, -alph, g, bL, bU);
                     if norm(s) <= delta
                         wa = Aprod(s);
                         gts = g'*s;
@@ -386,7 +383,7 @@ classdef BcflashSolver < solvers.NlpSolver
                     % will be replaced in future versions of the code.
                     
                     alph = extrapf*alph;
-                    s = bcflash.gpstep(x, -alph, g, bL, bU);
+                    s = solvers.BcflashSolver.gpstep(x, -alph, g, bL, bU);
                     if norm(s) <= delta
                         wa = Aprod(s);
                         gts = g'*s;
@@ -402,7 +399,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 
                 % Recover the last successful step.
                 alph = alphs;
-                s = bcflash.gpstep(x, -alph, g, bL, bU);
+                s = solvers.BcflashSolver.gpstep(x, -alph, g, bL, bU);
             end
             
         end % cauchy
@@ -459,7 +456,7 @@ classdef BcflashSolver < solvers.NlpSolver
             nSteps = 0;
             
             % Find the smallest break-point on the ray x + alph*w.
-            [~, brptMin, ~] = bcflash.breakpt(x, w, bL, bU);
+            [~, brptMin, ~] = solvers.BcflashSolver.breakpt(x, w, bL, bU);
             
             % Reduce alph until the sufficient decrease condition is
             % satisfied or x + alph*w is feasible.
@@ -469,7 +466,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 % Calculate P[x + alph*w] - x and check the sufficient
                 % decrease condition.
                 nSteps = nSteps + 1;
-                s = bcflash.gpstep(x, alph, w, bL, bU);
+                s = solvers.BcflashSolver.gpstep(x, alph, w, bL, bU);
                 As = Aprod(s);
                 gts = g' * s;
                 q = 0.5 * s' * As + gts;
@@ -493,8 +490,8 @@ classdef BcflashSolver < solvers.NlpSolver
                 alph = brptMin;
             end
             % Compute the final iterate and step.
-            s = bcflash.gpstep(x, alph, w, bL, bU);
-            x = bcflash.mid(x + alph*w, bL, bU);
+            s = solvers.BcflashSolver.gpstep(x, alph, w, bL, bU);
+            x = solvers.BcflashSolver.mid(x + alph*w, bL, bU);
             w = s;
         end % prsrch
         
@@ -562,7 +559,7 @@ classdef BcflashSolver < solvers.NlpSolver
             As = Aprod(s);
             
             % Compute the Cauchy point.
-            x = bcflash.mid(x + s, bL, bU);
+            x = solvers.BcflashSolver.mid(x + s, bL, bU);
             
             % Start the main iter loop.
             % There are at most n iters because at each iter
@@ -596,10 +593,10 @@ classdef BcflashSolver < solvers.NlpSolver
                 stol = 0;
                 
                 % Create the submatrix operator.
-                Bprod = @(x)bcflash.Afree(x, Aprod, indFree, n);
+                Bprod = @(x)solvers.BcflashSolver.Afree(x, Aprod, indFree, n);
                 
                 L = speye(nFree); % No preconditioner for now.
-                [w, iterTR, infoTR] = bcflash.trpcg(Bprod, gFree, ...
+                [w, iterTR, infoTR] = solvers.BcflashSolver.trpcg(Bprod, gFree, ...
                     delta, L, tol, stol, iterMax);
                 
                 iters = iters + iterTR;
@@ -768,7 +765,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 else
                     alph = 0;
                 end
-                sigma = bcflash.trqsol(w, p, delta);
+                sigma = solvers.BcflashSolver.trqsol(w, p, delta);
                 % Exit if there is negative curvature or if the
                 % iterates exit the trust region.
                 if (ptq <= 0 || alph >= sigma)

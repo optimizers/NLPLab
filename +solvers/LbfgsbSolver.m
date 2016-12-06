@@ -37,16 +37,18 @@ classdef LbfgsbSolver < solvers.NlpSolver
             self.pout = pout;
             self.fs = fs;
             self.stop_reason = stop_reason;
-            self.nbfg = nbfg;
-            self.time_total = rt;
+            self.nObjFunc = nbfg;
+            self.nGrad = nbfg;
+            self.nHess = 0;
+            self.solveTime = rt;
             self.iter_hist = iter_hist;
-            self.proj_grad_norm = iter_hist(end, 3);
+            self.pgNorm = iter_hist(end, 3);
             self.iter = iter_hist(end, 1);
             
             self.x = zProj;
             
             fprintf('\nEXIT L-BFGS-B: %s\n', self.stop_reason);
-            fprintf('||Pg|| = %8.1e\n', self.proj_grad_norm);
+            fprintf('||Pg|| = %8.1e\n', self.pgNorm);
         end
         
     end % public methods

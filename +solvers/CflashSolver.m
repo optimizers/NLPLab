@@ -34,7 +34,6 @@ classdef CflashSolver < solvers.NlpSolver
         verbose        % log level
         iStop          % exit flag
         exitMsg       % string indicating exit
-        log            % Added logger (logging4matlab)
         backtrack      % Armijo linesearch type backtracking
         eqTol          % Tolerance for equalities (see indFree)
         nProj;         % # of projections
@@ -43,10 +42,7 @@ classdef CflashSolver < solvers.NlpSolver
       
     properties (SetAccess = private, Hidden = true)
         mu0            % sufficient decrease parameter
-        gTol
         cgTol
-        aFeasTol          % absoulte error in function
-        rFeasTol          % relative error in function
         fMin
         fid            % File ID of where to direct log output
     end % private properties
@@ -116,25 +112,24 @@ classdef CflashSolver < solvers.NlpSolver
                 error('No normJac attribute in nlp');
             end
             
-            self = self@solvers.NlpSolver(nlp, varargin{:});
-            
             % Parse input parameters and initialize local variables.
             p = inputParser;
-            p.KeepUnmatched = false;
+            p.KeepUnmatched = true;
             p.addParameter('maxCgIter', length(nlp.x0));
             p.addParameter('cgTol', 0.1);
-            p.addParameter('gTol', 1e-5);
             p.addParameter('fMin', -1e32);
             p.addParameter('mu0', 0.01);
-            p.addParameter('verbose', 1);
+            p.addParameter('verbose', 2);
             p.addParameter('fid', 1);
             p.addParameter('backtrack', false);
             p.addParameter('eqTol', 1e-6);
             p.addParameter('maxProj', 1e5);
+            
             p.parse(varargin{:});
             
+            self = self@solvers.NlpSolver(nlp, p.Unmatched);
+            
             % Store various objects and parameters.
-            self.gTol = p.Results.gTol;
             self.cgTol = p.Results.cgTol;
             self.maxCgIter = p.Results.maxCgIter;
             self.fMin = p.Results.fMin;
@@ -159,7 +154,7 @@ classdef CflashSolver < solvers.NlpSolver
             gNorm = norm(g);
             delta = gNorm;
             self.gNorm0 = gNorm;
-            self.rOptTol = self.gTol * gNorm;
+            self.rOptTol = self.aOptTol * gNorm;
             
             % Actual and predicted reductions. Initial inf value prevents
             % exits based on related on first iter.
@@ -370,8 +365,8 @@ classdef CflashSolver < solvers.NlpSolver
                     self.printf('%-15s: %3s %8.1e', 'cgTol', '', ...
                         self.cgTol);
                     self.printf('%5s','');
-                    self.printf('%-15s: %3s %8.1e\n', 'gTol', '', ...
-                        self.gTol);
+                    self.printf('%-15s: %3s %8.1e\n', 'aOptTol', '', ...
+                        self.aOptTol);
                     self.printf('%-15s: %3s %8.1e', 'mu0', '', self.mu0);
                     self.printf('%5s', '');
                     self.printf('%-15s: %3s %8i\n', 'maxProj', '', ...

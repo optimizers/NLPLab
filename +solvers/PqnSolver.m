@@ -43,20 +43,12 @@ classdef PqnSolver < solvers.NlpSolver
     properties (SetAccess = private, Hidden = false)
         % Norm of projected gradient at x
         pgNorm;
-        % Iteration counter
-        iter;
         % SPG (sub-problem) iteration counter
         spgIter;
-        % Execution time
-        solveTime;
         % Exit flag
         iStop;
-        % Solved flag
-        solved;
         % Projection calls counter
         nProj;
-        % Objective function calls counter
-        nObjFunc;
     end % gettable private properties
         
     properties (Access = private, Hidden = false)
@@ -121,12 +113,10 @@ classdef PqnSolver < solvers.NlpSolver
             if ~ismethod(nlp, 'project')
                 error('nlp doesn''t contain a project method');
             end
-            
-            self = self@solvers.NlpSolver(nlp, varargin{:});
-            
+               
             % Gathering optional arguments and setting default values
             p = inputParser;
-            p.KeepUnmatched = false;
+            p.KeepUnmatched = true;
             % PQN parameters
             p.addParameter('verbose', 2);
             p.addParameter('progTol', 1e-9);
@@ -150,6 +140,8 @@ classdef PqnSolver < solvers.NlpSolver
             p.addParameter('spgMemory', 1);
             
             p.parse(varargin{:});
+            
+            self = self@solvers.NlpSolver(nlp, p.Unmatched);
             
             % PQN parameters
             self.verbose = p.Results.verbose;
