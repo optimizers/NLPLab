@@ -39,7 +39,7 @@ classdef CflashSolver < solvers.NlpSolver
         nProj;         % # of projections
         maxProj;       % maximal # of projections
     end % gettable private properties
-      
+    
     properties (SetAccess = private, Hidden = true)
         mu0            % sufficient decrease parameter
         cgTol
@@ -155,6 +155,7 @@ classdef CflashSolver < solvers.NlpSolver
             delta = gNorm;
             self.gNorm0 = gNorm;
             self.rOptTol = self.aOptTol * gNorm;
+            self.rFeasTol = self.aFeasTol * abs(f);
             
             % Actual and predicted reductions. Initial inf value prevents
             % exits based on related on first iter.
@@ -192,8 +193,8 @@ classdef CflashSolver < solvers.NlpSolver
                     self.iStop = self.EXIT_FATOL;
                 end
                 
-                exit = abs(actRed) <= self.rFeasTol*abs(f) && ...
-                    preRed  <= self.rFeasTol*abs(f);
+                exit = abs(actRed) <= self.rFeasTol && ...
+                    preRed  <= self.rFeasTol;
                 if ~self.iStop && exit
                     self.iStop = self.EXIT_FRTOL;
                 end
@@ -321,6 +322,10 @@ classdef CflashSolver < solvers.NlpSolver
                     x = xc;
                 end
             end % main loop
+            
+            self.nObjFunc = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
+            self.nGrad = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
+            self.nHess = self.nlp.ncalls_hvp + self.nlp.ncalls_hes;
             
             %% End of solve
             self.solved = ~(self.istop == 2 || self.istop == 6 || ...
@@ -1016,7 +1021,7 @@ classdef CflashSolver < solvers.NlpSolver
                 iter = iter + 1;
             end
         end % armijo backtracking
-
+        
     end % private methods
     
     
@@ -1030,13 +1035,13 @@ classdef CflashSolver < solvers.NlpSolver
     
     
     methods (Access = private, Static)
-               
+        
         function xFree = Afree(xFree, Aprod, indFree, n)
             z = zeros(n,1);
             z(indFree) = xFree;
             z = Aprod(z);
             xFree = z(indFree);
-        end 
+        end
         
         function sigma = trqsol(x, p, delta)
             %% TRQSOL  Largest solution of the TR equation.

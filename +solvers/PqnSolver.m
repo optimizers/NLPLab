@@ -50,7 +50,7 @@ classdef PqnSolver < solvers.NlpSolver
         % Projection calls counter
         nProj;
     end % gettable private properties
-        
+    
     properties (Access = private, Hidden = false)
         % PQN parameters
         verbose; % 0, 1 or 2
@@ -74,7 +74,7 @@ classdef PqnSolver < solvers.NlpSolver
         spgBbType; % Use Barzilai-Borwein step correction
         spgMemory; % # previous vals to consider in non-monotone linesearch
     end % private properties
-      
+    
     properties (Hidden = true, Constant)
         EXIT_MSG = { ...
             ['First-Order Optimality Conditions Below aOptTol at', ...
@@ -113,7 +113,7 @@ classdef PqnSolver < solvers.NlpSolver
             if ~ismethod(nlp, 'project')
                 error('nlp doesn''t contain a project method');
             end
-               
+            
             % Gathering optional arguments and setting default values
             p = inputParser;
             p.KeepUnmatched = true;
@@ -132,12 +132,12 @@ classdef PqnSolver < solvers.NlpSolver
             % SPG sub-problem parameters
             p.addParameter('spgaOptTol', 1e-5);
             p.addParameter('spgProgTol', 1e-9);
-            p.addParameter('spgTestOpt', 0);
+            p.addParameter('spgTestOpt', 1);
             p.addParameter('spgVerbose', 0);
             p.addParameter('spgUseSpectral', 1);
-            p.addParameter('spgProjectLS', 0);
-            p.addParameter('spgBbType', 0);
-            p.addParameter('spgMemory', 1);
+            p.addParameter('spgProjectLS', 1);
+            p.addParameter('spgBbType', 1);
+            p.addParameter('spgMemory', 10);
             
             p.parse(varargin{:});
             
@@ -189,7 +189,7 @@ classdef PqnSolver < solvers.NlpSolver
             % Exit flag set to 0, will exit if not 0
             self.iStop = 0;
             % Project initial parameter vector
-            x = self.project(self.x0);
+            x = self.project(self.nlp.x0);
             
             % Evaluate initial parameters
             if ~strcmp(self.hess, 'lbfgs')
@@ -199,6 +199,7 @@ classdef PqnSolver < solvers.NlpSolver
             end
             
             self.rOptTol = self.aOptTol * norm(g);
+            self.rFeasTol = self.aFeasTol * norm(f);
             pgnrm = norm(self.gpstep(x, g));
             % Check Optimality of Initial Point
             if pgnrm < self.rOptTol + self.aOptTol
@@ -219,9 +220,9 @@ classdef PqnSolver < solvers.NlpSolver
                     s = x - xOld;
                     switch self.hess
                         case 'lbfgs'
-                            [S, Y, Hdiag] = PqnSolver.lbfgsUpdate(y, s, ...
-                                self.corrections, ...
-                                S, Y, Hdiag);
+                            [S, Y, Hdiag] = ...
+                                solvers.PqnSolver.lbfgsUpdate(y, s, ...
+                                self.corrections, S, Y, Hdiag);
                             % Make Compact Representation
                             k = size(Y, 2);
                             L = zeros(k);
@@ -231,7 +232,8 @@ classdef PqnSolver < solvers.NlpSolver
                             N = [S / Hdiag, Y];
                             M = [S'*S/Hdiag, L; L', -diag(diag(S' * Y))];
                             HvFunc = @(v) ...
-                                PqnSolver.lbfgsHvFunc2(v, Hdiag, N, M);
+                                solvers.PqnSolver.lbfgsHvFunc2(v, ...
+                                Hdiag, N, M);
                         case 'exact'
                             HvFunc = @(v) H * v;
                         otherwise
@@ -262,7 +264,8 @@ classdef PqnSolver < solvers.NlpSolver
                 
                 % We will use normgtd in the log later
                 normgtd = gtd / (norm(g) * norm(d));
-                if normgtd > -self.progTol
+                if normgtd > -self.progTol || isnan(normgtd)
+                    % d might be null
                     self.iStop = 2;
                     % Leaving now saves some processing
                     break;
@@ -320,7 +323,7 @@ classdef PqnSolver < solvers.NlpSolver
                 elseif max(abs(t * d)) < self.progTol * norm(d) && ~failed
                     self.iStop = 4;
                 elseif abs((f - fOld)/max([fOld, f, 1])) ...
-                        < self.progTol && ~failed
+                        < self.rFeasTol && ~failed
                     self.iStop = 5;
                 elseif failed && oldFailed
                     % Two consecutive linesearches have failed, exit
@@ -341,6 +344,10 @@ classdef PqnSolver < solvers.NlpSolver
             self.fx = f;
             self.pgNorm = pgnrm;
             
+            self.nObjFunc = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
+            self.nGrad = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
+            self.nHess = self.nlp.ncalls_hvp + self.nlp.ncalls_hes;
+            
             %% End of solve
             self.solved = ~(self.iStop == 7 || self.iStop == 8 || ...
                 self.iStop == 9);
@@ -352,7 +359,7 @@ classdef PqnSolver < solvers.NlpSolver
                 self.printf('Stop tolerance = %8.1e\n', self.rOptTol);
             end
             if self.verbose >= 2
-                self.printHeaderFooter(self, 'footer');
+                self.printHeaderFooter('footer');
             end
         end % solve
         
@@ -408,8 +415,6 @@ classdef PqnSolver < solvers.NlpSolver
                         self.spgBbType);
                     self.printf('\t%-15s: %3s %8d\n', ' spgMemory', '', ...
                         self.spgMemory);
-                    self.printf('\n%15s: %3s %8s\n', 'Projection type', ...
-                        '', class(self.nlp.projModel));
                 case 'footer'
                     % Print footer
                     self.printf('\n')
@@ -486,7 +491,7 @@ classdef PqnSolver < solvers.NlpSolver
             %% solveSubProblem - minimize the constrained quad. approx.
             % Calls MinConf_SPG on a quadratic approximation of the
             % objective function at x. Uses the 'project' function defined
-            % in projModel to project values on the constraint set.
+            % in the nlpmodel to project values on the constraint set.
             % Inputs:
             %   - x: origin from where to compute the minimizing direction
             %   - g: gradient of the objective function at x
@@ -502,8 +507,8 @@ classdef PqnSolver < solvers.NlpSolver
             % setting parameters
             SpgOptions.verbose = self.spgVerbose;
             % Impose optimality as fraction of the norm of the proj. grad.
-            SpgOptions.aOptTol = self.spgaOptTol;
-            SpgOptions.progTol = self.spgProgTol;
+            SpgOptions.aOptTol = self.aOptTol; % self.spgaOptTol;
+            SpgOptions.progTol = self.progTol; % self.spgProgTol;
             SpgOptions.testOpt = self.spgTestOpt;
             SpgOptions.useSpectral = self.spgUseSpectral;
             SpgOptions.projectLS = self.spgProjectLS;
@@ -511,13 +516,14 @@ classdef PqnSolver < solvers.NlpSolver
             SpgOptions.memory = self.spgMemory;
             
             % Building a quadratic approximation
-            import model.ShiftedQPModel;
-            quadModel = model.ShiftedQPModel('', xInit, x, g, H, ...
+            import model.ShiftedQpModel;
+            quadModel = model.ShiftedQpModel('', xInit, x, g, H, ...
                 @(p) self.nlp.project(p));
             
             % Solving using MinConf_SPG
             import solvers.SpgSolver
             subProblem = SpgSolver(quadModel, SpgOptions);
+            subProblem = subProblem.solve();
             
             if ~subProblem.solved
                 error('SpgSolver exited without ''pseudo''-convergence');

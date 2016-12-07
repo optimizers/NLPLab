@@ -137,7 +137,7 @@ classdef TmpSolver < solvers.NlpSolver
             p.parse(varargin{:});
             
             self = self@solvers.NlpSolver(nlp, p.Unmatched);
-                        
+            
             self.verbose = p.Results.verbose;
             self.suffDec = p.Results.suffDec;
             self.maxIterLS = p.Results.maxIterLS;
@@ -338,6 +338,10 @@ classdef TmpSolver < solvers.NlpSolver
             self.fx = f;
             self.pgNorm = pgnrm;
             
+            self.nObjFunc = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
+            self.nGrad = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
+            self.nHess = self.nlp.ncalls_hvp + self.nlp.ncalls_hes;
+            
             %% End of solve
             self.solveTime = toc(self.solveTime);
             self.solved = ~(self.iStop == 8 || self.iStop == 9);
@@ -348,10 +352,6 @@ classdef TmpSolver < solvers.NlpSolver
                 self.printf('||Pg|| = %8.1e\n', self.pgNorm);
                 self.printf('Stop tolerance = %8.1e\n', self.rOptTol);
             end
-            
-            self.nObjFunc = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
-            self.nGrad = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
-            self.nHess = self.nlp.ncalls_hvp;
             
             if self.verbose >= 2
                 self.printHeaderFooter('footer');

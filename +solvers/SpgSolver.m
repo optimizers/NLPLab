@@ -106,7 +106,7 @@ classdef SpgSolver < solvers.NlpSolver
             if ~ismethod(nlp, 'project')
                 error('nlp doesn''t contain a project method');
             end
-             
+            
             % Gathering optional arguments and setting default values
             p = inputParser;
             p.KeepUnmatched = true;
@@ -284,15 +284,18 @@ classdef SpgSolver < solvers.NlpSolver
                 elseif self.iter >= self.maxIter
                     self.iStop = 7;
                 end
-                
                 if self.iStop ~= 0
                     break;
                 end
-                self.x = x;
-                self.fx = f;
-                self.pgNorm = pgnrm;
                 self.iter = self.iter + 1;
             end % main loop
+            self.x = x;
+            self.fx = f;
+            self.pgNorm = pgnrm;
+            
+            self.nObjFunc = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
+            self.nGrad = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
+            self.nHess = self.nlp.ncalls_hvp + self.nlp.ncalls_hes;
             
             %% End of solve
             self.solved = ~(self.iStop == 6 || self.iStop == 7);
@@ -339,8 +342,6 @@ classdef SpgSolver < solvers.NlpSolver
                         self.bbType);
                     self.printf('\t%-15s: %3s %8d\n', ' memory', '', ...
                         self.memory);
-                    self.printf('\n%15s: %3s %8s\n', 'Projection type', ...
-                        '', class(self.nlp.projModel));
                 case 'footer'
                     % Print footer
                     self.printf('\n')
