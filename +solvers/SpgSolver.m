@@ -109,6 +109,7 @@ classdef SpgSolver < solvers.NlpSolver
             
             % Gathering optional arguments and setting default values
             p = inputParser;
+            p.PartialMatching = false;
             p.KeepUnmatched = true;
             p.addParameter('verbose', 2);
             p.addParameter('progTol', 1e-9);
@@ -116,9 +117,9 @@ classdef SpgSolver < solvers.NlpSolver
             p.addParameter('suffDec', 1e-4);
             p.addParameter('memory', 10);
             p.addParameter('useSpectral', 1);
-            p.addParameter('projectLS', 1);
+            p.addParameter('projectLS', 0);
             p.addParameter('testOpt', 1);
-            p.addParameter('bbType', 1);
+            p.addParameter('bbType', 0);
             p.addParameter('fid', 1);
             p.addParameter('maxIterLS', 10); % Max iters for linesearch
             
@@ -276,7 +277,8 @@ classdef SpgSolver < solvers.NlpSolver
                     if pgnrm < self.rOptTol + self.aOptTol
                         self.iStop = 3;
                     end
-                elseif max(abs(t * d)) < self.progTol * norm(d) + ...
+                end
+                if max(abs(t * d)) < self.progTol * norm(d) + ...
                         self.progTol
                     self.iStop = 4;
                 elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol

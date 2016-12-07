@@ -55,6 +55,7 @@ classdef NlpSolver < handle
             
             % Define optional parameters and default values
             p = inputParser;
+            p.PartialMatching = false;
             p.KeepUnmatched = false;
             p.addParameter('name',       'generic');
             p.addParameter('aFeasTol',  1.0e-8);

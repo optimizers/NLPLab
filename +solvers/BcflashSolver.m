@@ -59,6 +59,7 @@ classdef BcflashSolver < solvers.NlpSolver
             
             % Parse input parameters and initialize local variables
             p = inputParser;
+            p.PartialMatching = false;
             p.KeepUnmatched = true;
             p.addParameter('maxCgIter', length(nlp.x0));
             p.addParameter('cgTol', 0.1);
