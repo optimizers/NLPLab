@@ -116,7 +116,7 @@ classdef SpgSolver < solvers.NlpSolver
             p.addParameter('suffDec', 1e-4);
             p.addParameter('memory', 10);
             p.addParameter('useSpectral', 1);
-            p.addParameter('projectLS', 0);
+            p.addParameter('projectLS', 1);
             p.addParameter('testOpt', 1);
             p.addParameter('bbType', 1);
             p.addParameter('fid', 1);
@@ -169,6 +169,7 @@ classdef SpgSolver < solvers.NlpSolver
             [f, g] = self.obj(x);
             
             self.rOptTol = self.aOptTol * norm(g);
+            self.rFeasTol = self.aFeasTol * abs(f);
             
             % Optionally check optimality
             pgnrm = 0;
@@ -210,7 +211,7 @@ classdef SpgSolver < solvers.NlpSolver
                 
                 % Check that Progress can be made along the direction
                 gtd = g' * d;
-                if gtd > -self.progTol * norm(g) * norm(d)
+                if gtd > -self.progTol * norm(g) * norm(d) - self.progTol
                     self.iStop = 2;
                     % Leaving now saves some processing
                     break;
@@ -275,9 +276,10 @@ classdef SpgSolver < solvers.NlpSolver
                     if pgnrm < self.rOptTol + self.aOptTol
                         self.iStop = 3;
                     end
-                elseif max(abs(t * d)) < self.progTol * norm(d)
+                elseif max(abs(t * d)) < self.progTol * norm(d) + ...
+                        self.progTol
                     self.iStop = 4;
-                elseif abs((f - fOld)/max([fOld, f, 1])) < self.progTol
+                elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
                     self.iStop = 5;
                 elseif self.nObjFunc > self.maxEval
                     self.iStop = 6;

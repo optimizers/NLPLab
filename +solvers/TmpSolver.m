@@ -267,7 +267,7 @@ classdef TmpSolver < solvers.NlpSolver
                 
                 % Check that progress can be made along the direction
                 gtd = g' * d;
-                if gtd > -self.aOptTol * norm(g) * norm(d)
+                if gtd > -self.aOptTol * norm(g) * norm(d) - self.aOptTol
                     self.iStop = 3;
                     % Leave now
                     break;
@@ -317,9 +317,10 @@ classdef TmpSolver < solvers.NlpSolver
                 elseif pgnrm <= self.rOptTol + self.aOptTol
                     self.iStop = 5;
                     % Check for lack of progress
-                elseif sum(abs(t * d)) < self.aOptTol * norm(d)
+                elseif sum(abs(t * d)) < self.aOptTol * norm(d) + ...
+                        self.aOptTol
                     self.iStop = 6;
-                elseif abs((f - fOld)/max([fOld, f, 1])) < self.aFeasTol
+                elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
                     self.iStop = 7;
                 elseif self.nObjFunc > self.maxEval
                     self.iStop = 8;

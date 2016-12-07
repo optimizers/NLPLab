@@ -13,6 +13,8 @@ outInfo = {};
 addpath('~/Masters/NLPlab');
 addpath('~/Masters/logging4matlab/');
 addpath('~/Masters/Spot');
+addpath('~/Masters/optimization/lbfgsb');
+addpath('~/Masters/optimization/box_project');
 
 %% Building the model
 import model.QpModel;
@@ -79,15 +81,16 @@ outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
     solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
     solver.solveTime);
 
-% %% Solve using L-BFGS-B
-% import solvers.LbfgsbSolver;
-% solver = LbfgsbSolver(quadModel);
-% solver = solver.solve();
-%
-% nrmSol = norm(xRef - solver.x);
-% outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
-%     solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
-%     solver.solveTime);
+%% Solve using L-BFGS-B
+import solvers.LbfgsbSolver;
+solver = LbfgsbSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
+    'maxIter', 5e2);
+solver = solver.solve();
+
+nrmSol = norm(xRef - solver.x);
+outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
+    solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
+    solver.solveTime);
 
 %% Printing
 fprintf('\n\n\n');

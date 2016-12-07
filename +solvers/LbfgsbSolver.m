@@ -5,10 +5,44 @@ classdef LbfgsbSolver < solvers.NlpSolver
     % https://bitbucket.org/polylion/optimization
     
     
+    properties (SetAccess = private, Hidden = false)
+        % Norm of the projected gradient at x
+        pgNorm;
+        verbose; % 0, 1, 2
+        corrections;
+        postProcessing = [];
+        iterGuard = [];
+        startAttempt = [];
+        maxEval; % Maximum number of objective function evaluations
+        maxRT;
+    end
+    
+    
     methods (Access = public)
         
         function self = LbfgsbSolver(nlp, varargin)
-            self = self@solvers.NlpSolver(nlp, varargin{:});
+            %% Constructor
+            
+            % Checking if lbfgsb.m is on the path
+            if ~exist('lbfgsb', 'file')
+                error('L-BFGS-B not on MATLAB''s path!');
+            end
+            
+            p = inputParser;
+            p.KeepUnmatched = true;
+            p.addParameter('verbose', 2);
+            p.addParameter('corrections', 7);
+            p.addParameter('maxEval', 5e2);
+            p.addParameter('maxRT', 1e4);
+            
+            p.parse(varargin{:});
+            
+            self = self@solvers.NlpSolver(nlp, p.Unmatched);
+            
+            self.verbose = p.Results.verbose;
+            self.corrections = p.Results.corrections;
+            self.maxRT = p.Results.maxRT;
+            self.maxEval = p.Results.maxEval;
         end
         
         function self = solve(self)
@@ -17,38 +51,43 @@ classdef LbfgsbSolver < solvers.NlpSolver
             % Handle that returns nlp's objective value & gradient
             fgFunc = @(x, p) self.objSupp(x, p);
             
-            options.stop_crit = self.options.ftol * ...
-                norm(self.gobj_local(self.x0), inf);
+            % Relative optimality tolerance
+            self.rOptTol = self.aOptTol * ...
+                norm(self.nlp.gobj_local(self.nlp.x0), inf);
+            
+            
+            % L-BFGS-B only handles verbose true or false, therefore
+            % removing one from verbose and pass it to L-BFGS-B. That way
+            % the final print can be displayed without the solver's log.
+            verb = max(self.verbose - 1, 0);
             
             % Calling L-BFGS-B
-            [zProj, pout, fs, stop_reason, nbfg, rt, iter_hist] = ...
-                lbfgsb(self.x0, fgFunc, [], self.bL, self.bU, ...
-                options.ftol, self.options.stop_crit, ...
-                options.nb_corr, self.options.max_iter, ...
-                self.options.max_rt, self.options.max_fg, ...
-                self.options.verbosity, self.options.post_processing, ...
-                self.options.iter_guard, self.options.start_attempt);
+            [zProj, ~, fs, stopReason, nFg, rt, iterHist] = ...
+                lbfgsb(self.nlp.x0, fgFunc, [], self.nlp.bL, ...
+                self.nlp.bU, self.aFeasTol, self.rOptTol, ...
+                self.corrections, self.maxIter, self.maxRT, ...
+                self.maxEval, verb, self.postProcessing, ...
+                self.iterGuard, self.startAttempt);
             
-            if ~strcmp(stop_reason(1:4), 'CONV')
+            if ~strcmp(stopReason(1:4), 'CONV')
                 warning('Projection sub-problem didn''t converge: %s', ...
-                    stop_reason);
+                    stopReason);
             end
             
-            self.pout = pout;
-            self.fs = fs;
-            self.stop_reason = stop_reason;
-            self.nObjFunc = nbfg;
-            self.nGrad = nbfg;
+            % Collecting information from L-BFGS-B's output
+            self.fx = fs;
+            self.nObjFunc = nFg;
+            self.nGrad = nFg;
             self.nHess = 0;
             self.solveTime = rt;
-            self.iter_hist = iter_hist;
-            self.pgNorm = iter_hist(end, 3);
-            self.iter = iter_hist(end, 1);
-            
+            self.pgNorm = iterHist(end, 3);
+            self.iter = iterHist(end, 1);
             self.x = zProj;
             
-            fprintf('\nEXIT L-BFGS-B: %s\n', self.stop_reason);
-            fprintf('||Pg|| = %8.1e\n', self.pgNorm);
+            if self.verbose
+                fprintf('\nEXIT L-BFGS-B: %s\n', stopReason);
+                fprintf('||Pg|| = %8.1e\n', self.pgNorm);
+            end
         end
         
     end % public methods
@@ -56,9 +95,9 @@ classdef LbfgsbSolver < solvers.NlpSolver
     
     methods (Access = private)
         
-        function [x, g, p] = objSupp(self, x, p)
+        function [f, g, p] = objSupp(self, x, p)
             %% Calling ProjModel's obj function and returning p
-            [x, g] = self.nlp.obj(x);    
+            [f, g] = self.nlp.obj(x);
         end
         
     end % private methods
