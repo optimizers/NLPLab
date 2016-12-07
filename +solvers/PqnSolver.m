@@ -263,8 +263,7 @@ classdef PqnSolver < solvers.NlpSolver
                 gtd = g' * d;
                 
                 % We will use normgtd in the log later
-                normgtd = gtd / (norm(g) * norm(d));
-                if normgtd > -self.progTol || isnan(normgtd)
+                if gtd > -self.progTol * norm(g) * norm(d) - self.progTol
                     % d might be null
                     self.iStop = 2;
                     % Leaving now saves some processing
@@ -314,16 +313,18 @@ classdef PqnSolver < solvers.NlpSolver
                 % Output Log
                 if self.verbose >= 2
                     self.printf(self.LOG_BODY, self.iter, self.spgIter, ...
-                        self.nObjFunc, self.nProj, t, f, pgnrm, normgtd);
+                        self.nObjFunc, self.nProj, t, f, pgnrm, gtd / ...
+                        (norm(g) * norm(d)));
                 end
                 
                 % Check optimality conditions
                 if pgnrm < self.rOptTol + self.aOptTol
                     self.iStop = 3;
-                elseif max(abs(t * d)) < self.progTol * norm(d) && ~failed
+                elseif max(abs(t * d)) < self.progTol * norm(d) + ...
+                        self.progTol && ~failed
                     self.iStop = 4;
-                elseif abs((f - fOld)/max([fOld, f, 1])) ...
-                        < self.rFeasTol && ~failed
+                elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol ...
+                        && ~failed
                     self.iStop = 5;
                 elseif failed && oldFailed
                     % Two consecutive linesearches have failed, exit
