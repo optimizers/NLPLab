@@ -84,7 +84,8 @@ classdef BcflashSolver < solvers.NlpSolver
             %% Solve
             self.solveTime = tic;
             % Make sure initial point is feasible
-            x = solvers.BcflashSolver.mid(self.nlp.x0, self.nlp.bL, self.nlp.bU);
+            x = solvers.BcflashSolver.mid(self.nlp.x0, self.nlp.bL, ...
+                self.nlp.bU);
             
             % First objective and gradient evaluation.
             f = self.nlp.fobj(x);
@@ -95,6 +96,7 @@ classdef BcflashSolver < solvers.NlpSolver
             delta = gNorm;
             self.gNorm0 = gNorm;
             self.rOptTol = self.aOptTol * gNorm;
+            self.rFeasTol = self.aFeasTol * abs(f);
             
             % Actual and predicted reductions. Initial inf value prevents
             % exits based on related on first iter.
@@ -112,7 +114,8 @@ classdef BcflashSolver < solvers.NlpSolver
             %% Main loop
             while true
                 % Check stopping conditions
-                pgNorm = solvers.BcflashSolver.gpnrm2(x, self.nlp.bL, self.nlp.bU, g);
+                pgNorm = solvers.BcflashSolver.gpnrm2(x, self.nlp.bL, ...
+                    self.nlp.bU, g);
                 exit = pgNorm <= self.rOptTol;
                 if ~self.iStop && exit
                     self.iStop = self.EXIT_OPTIMAL;
@@ -129,8 +132,8 @@ classdef BcflashSolver < solvers.NlpSolver
                     self.iStop = self.EXIT_FATOL;
                 end
                 
-                exit = abs(actRed) <= self.rFeasTol * abs(f) && ...
-                    preRed  <= self.rFeasTol * abs(f);
+                exit = abs(actRed) <= self.rFeasTol && ...
+                    preRed  <= self.rFeasTol;
                 if ~self.iStop && exit
                     self.iStop = self.EXIT_FRTOL;
                 end
@@ -223,6 +226,10 @@ classdef BcflashSolver < solvers.NlpSolver
                 
             end % main loop
             
+            self.nObjFunc = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
+            self.nGrad = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
+            self.nHess = self.nlp.ncalls_hvp + self.nlp.ncalls_hes;
+            
             %% End of solve
             self.solveTime = toc(self.solveTime);
             self.solved = ~(self.iStop == 2 || self.iStop == 6);
@@ -233,9 +240,6 @@ classdef BcflashSolver < solvers.NlpSolver
                 self.printf('||Pg|| = %8.1e\n', self.pgNorm);
                 self.printf('Stop tolerance = %8.1e\n', self.rOptTol);
             end
-            self.nObjFunc = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
-            self.nGrad = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
-            self.nHess = self.nlp.ncalls_hvp;
             if self.verbose >= 2
                 self.printHeaderFooter('footer');
             end
@@ -593,11 +597,13 @@ classdef BcflashSolver < solvers.NlpSolver
                 stol = 0;
                 
                 % Create the submatrix operator.
-                Bprod = @(x)solvers.BcflashSolver.Afree(x, Aprod, indFree, n);
+                Bprod = @(x)solvers.BcflashSolver.Afree(x, Aprod, ...
+                    indFree, n);
                 
                 L = speye(nFree); % No preconditioner for now.
-                [w, iterTR, infoTR] = solvers.BcflashSolver.trpcg(Bprod, gFree, ...
-                    delta, L, tol, stol, iterMax);
+                [w, iterTR, infoTR] = ...
+                    solvers.BcflashSolver.trpcg(Bprod, gFree, delta, L, ...
+                    tol, stol, iterMax);
                 
                 iters = iters + iterTR;
                 w = L' \ w;
@@ -638,7 +644,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 elseif iters > iterMax
                     info = 3;
                     return
-                end 
+                end
             end % faces
         end % spcg
         
@@ -778,7 +784,7 @@ classdef BcflashSolver < solvers.NlpSolver
                         info = 4;
                     end
                     
-                    return 
+                    return
                 end
                 % Update w and the residuals r and t.
                 % Note that t = L*r.
@@ -910,7 +916,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 sigma = (rad - ptx)/ptp;
             else
                 sigma = 0;
-            end 
+            end
         end % trqsol
         
     end % private static methods
