@@ -123,6 +123,7 @@ classdef TmpSolver < solvers.NlpSolver
             
             % Gathering optional arguments and setting default values
             p = inputParser;
+            p.PartialMatching = false;
             p.KeepUnmatched = true;
             p.addParameter('verbose', 2);
             p.addParameter('maxEval', 5e2);

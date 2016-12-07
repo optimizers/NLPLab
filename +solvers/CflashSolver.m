@@ -114,6 +114,7 @@ classdef CflashSolver < solvers.NlpSolver
             
             % Parse input parameters and initialize local variables.
             p = inputParser;
+            p.PartialMatching = false;
             p.KeepUnmatched = true;
             p.addParameter('maxCgIter', length(nlp.x0));
             p.addParameter('cgTol', 0.1);
@@ -795,7 +796,7 @@ classdef CflashSolver < solvers.NlpSolver
             self.logger.debug('-- Entering TRPCG --');
             self.logger.debug(sprintf('tol = %7.3e, δ = %7.3e,', tol, delta));
             % Initialize the iterate w and the residual r.
-            w = zeros(self.nlp.objSize, 1);
+            w = zeros(self.nlp.n, 1);
             % Initialize the residual r of grad q to -g.
             r = -g;
             % Initialize the direction p.
@@ -837,7 +838,7 @@ classdef CflashSolver < solvers.NlpSolver
                     alph = 0;
                 end
                 
-                sigma = Cflash.trqsol(w, p, delta);
+                sigma = solvers.CflashSolver.trqsol(w, p, delta);
                 % Exit if there is negative curvature or if the
                 % iterates exit the trust region.
                 self.logger.debug(sprintf('\tαCG = %7.1e, σ = %7.1e', ...
@@ -904,7 +905,7 @@ classdef CflashSolver < solvers.NlpSolver
             % constraints) as positions instead of logical
             iLow = find(self.nlp.iLow == true);
             iUpp = find(self.nlp.iUpp == true);
-            %             iLow = 1:self.nlp.objSize;
+            %             iLow = 1:self.nlp.n;
             %             iUpp = iLow;
             
             % Lower constraint intersections: Ax - cL > 0 & Aw < 0
@@ -1035,13 +1036,6 @@ classdef CflashSolver < solvers.NlpSolver
     
     
     methods (Access = private, Static)
-        
-        function xFree = Afree(xFree, Aprod, indFree, n)
-            z = zeros(n,1);
-            z(indFree) = xFree;
-            z = Aprod(z);
-            xFree = z(indFree);
-        end
         
         function sigma = trqsol(x, p, delta)
             %% TRQSOL  Largest solution of the TR equation.

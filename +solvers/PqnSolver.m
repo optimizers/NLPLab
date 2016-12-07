@@ -117,6 +117,7 @@ classdef PqnSolver < solvers.NlpSolver
             % Gathering optional arguments and setting default values
             p = inputParser;
             p.KeepUnmatched = true;
+            p.PartialMatching = false;
             % PQN parameters
             p.addParameter('verbose', 2);
             p.addParameter('progTol', 1e-9);
@@ -515,6 +516,7 @@ classdef PqnSolver < solvers.NlpSolver
             SpgOptions.projectLS = self.spgProjectLS;
             SpgOptions.bbType = self.spgBbType;
             SpgOptions.memory = self.spgMemory;
+            SpgOptions.maxIter = 1e4;
             
             % Building a quadratic approximation
             import model.ShiftedQpModel;
