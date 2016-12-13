@@ -29,6 +29,10 @@ classdef ProjModel < model.NlpModel
         objSize; % Real object size according to GeoS object
     end
     
+    properties (Access = public)
+       xbar; 
+    end
+    
     
     %% Public methods
     methods (Access = public)

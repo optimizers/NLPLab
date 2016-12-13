@@ -144,7 +144,7 @@ classdef CflashModel < model.ProjRecModel
                     subC = self.C(ind, :); % B * C
                     subCCt = self.CCt(ind, ind); % (B * C * C' * B')^-1
                     % Using CG to solve (B*C*C'*B') z = -B*C*wbar
-                    [z, ~] = pcg(subCCt, -subC*wbar, 1e-12, 5e2);
+                    [z, ~] = pcg(subCCt, subC*(-wbar), 1e-12, 5e2);
                     % For the unconstrained case, the solution is trivial
                     wProj = wbar + (subC' * z);
                 case 'lsqr'
