@@ -31,8 +31,8 @@ bL = -inf(n, 1);
 bU = inf(n, 1);
 A = randi(15, m, n) - randi(15, m, n);
 % For the PQN & SPG solvers, we need a projection function
-import model.LinIneqQpModel;
-liQuadModel = LinIneqQpModel('', x0, A, cL, cU, c, Q);
+import model.QpModel;
+qpModel = QpModel(Q, c, A, cL, cU, bL, bU, x0, '');
 
 %% MATLAB's quadprog is the reference solution
 xRef = quadprog(Q, c, [A; -A], [cU; -cL]);
