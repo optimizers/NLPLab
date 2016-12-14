@@ -334,7 +334,7 @@ classdef PqnSolver < solvers.NlpSolver
                     self.iStop = 7;
                 elseif self.nProj > self.maxProj
                     self.iStop = 8;
-                elseif self.iter > self.maxIter
+                elseif self.iter >= self.maxIter
                     self.iStop = 9;
                 end
                 if self.iStop ~= 0
