@@ -17,11 +17,11 @@ classdef LpModel < model.NlpModel
             %% Constructor
             
             % Setting optional parameters
-            n = size(A, 2);
-            if nargin < 8
+            n = size(C, 2);
+            if nargin < 7
                 x0 = zeros(n, 1);
                 name = '';
-            elseif nargin < 9
+            elseif nargin < 8
                 name = '';
             end
             

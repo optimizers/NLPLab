@@ -79,13 +79,12 @@ classdef ProjRecModel < model.RecModel
             
             % Variable that we desire to project on the constraint set
             % Here x is \bar{x}
-            self.projModel.xbar = x;
+            self.projSolver.nlp.xbar = x;
             
-            solver = self.projSolver(self.projModel, self.projOptions);
-            solver = solver.solve();
+            solver = self.projSolver.solve();
             
             % Finding the primal variable from the dual variable
-            z = self.projModel.dualToPrimal(zProj);
+            z = self.projSolver.nlp.dualToPrimal(zProj);
         end
         
     end

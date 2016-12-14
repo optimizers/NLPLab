@@ -59,8 +59,8 @@ classdef BcflashSolver < solvers.NlpSolver
             
             % Parse input parameters and initialize local variables
             p = inputParser;
-            p.PartialMatching = false;
             p.KeepUnmatched = true;
+            p.PartialMatching = false;
             p.addParameter('maxCgIter', length(nlp.x0));
             p.addParameter('cgTol', 0.1);
             p.addParameter('fMin', -1e32);
@@ -85,12 +85,11 @@ classdef BcflashSolver < solvers.NlpSolver
             %% Solve
             self.solveTime = tic;
             % Make sure initial point is feasible
-            x = solvers.BcflashSolver.mid(self.nlp.x0, self.nlp.bL, ...
+            x = solvers.BcflashSolver.project(self.nlp.x0, self.nlp.bL, ...
                 self.nlp.bU);
             
             % First objective and gradient evaluation.
-            f = self.nlp.fobj(x);
-            g = self.nlp.gobj(x);
+            [f, g] = self.obj(x);
             
             % Initialize stopping tolerance and initial TR radius
             gNorm = norm(g);
@@ -250,6 +249,18 @@ classdef BcflashSolver < solvers.NlpSolver
     
     
     methods (Access = private)
+        
+        function [f, g, H] = obj(self, x)
+            %% Obj
+            self.nObjFunc = self.nObjFunc + 1;
+            if nargout == 1
+                f = self.nlp.obj(x);
+            elseif nargout == 2
+                [f, g] = self.nlp.obj(x);
+            else % nargout == 3
+                [f, g, H] = self.nlp.obj(x);
+            end
+        end
         
         function printHeaderFooter(self, msg)
             switch msg
@@ -496,7 +507,7 @@ classdef BcflashSolver < solvers.NlpSolver
             end
             % Compute the final iterate and step.
             s = solvers.BcflashSolver.gpstep(x, alph, w, bL, bU);
-            x = solvers.BcflashSolver.mid(x + alph*w, bL, bU);
+            x = solvers.BcflashSolver.project(x + alph*w, bL, bU);
             w = s;
         end % prsrch
         
@@ -564,7 +575,7 @@ classdef BcflashSolver < solvers.NlpSolver
             As = Aprod(s);
             
             % Compute the Cauchy point.
-            x = solvers.BcflashSolver.mid(x + s, bL, bU);
+            x = solvers.BcflashSolver.project(x + s, bL, bU);
             
             % Start the main iter loop.
             % There are at most n iters because at each iter
@@ -813,8 +824,8 @@ classdef BcflashSolver < solvers.NlpSolver
             info = 5;
         end % trpcg
         
-        function x = mid(x, bL, bU)
-            %MID  Project a vector onto the box defined by bL, bU.
+        function x = project(x, bL, bU)
+            %Project  Project a vector onto the box defined by bL, bU.
             x = max( x, bL );
             x = min( x, bU );
         end

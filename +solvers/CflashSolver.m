@@ -114,8 +114,8 @@ classdef CflashSolver < solvers.NlpSolver
             
             % Parse input parameters and initialize local variables.
             p = inputParser;
-            p.PartialMatching = false;
             p.KeepUnmatched = true;
+            p.PartialMatching = false;
             p.addParameter('maxCgIter', length(nlp.x0));
             p.addParameter('cgTol', 0.1);
             p.addParameter('fMin', -1e32);
