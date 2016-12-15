@@ -84,12 +84,13 @@ classdef BcflashSolver < solvers.NlpSolver
         function self = solve(self)
             %% Solve
             self.solveTime = tic;
+            self.iter = 0;
             % Make sure initial point is feasible
             x = solvers.BcflashSolver.project(self.nlp.x0, self.nlp.bL, ...
                 self.nlp.bU);
             
             % First objective and gradient evaluation.
-            [f, g] = self.obj(x);
+            [f, g] = self.nlp.obj(x);
             
             % Initialize stopping tolerance and initial TR radius
             gNorm = norm(g);
@@ -250,18 +251,6 @@ classdef BcflashSolver < solvers.NlpSolver
     
     methods (Access = private)
         
-        function [f, g, H] = obj(self, x)
-            %% Obj
-            self.nObjFunc = self.nObjFunc + 1;
-            if nargout == 1
-                f = self.nlp.obj(x);
-            elseif nargout == 2
-                [f, g] = self.nlp.obj(x);
-            else % nargout == 3
-                [f, g, H] = self.nlp.obj(x);
-            end
-        end
-        
         function printHeaderFooter(self, msg)
             switch msg
                 case 'header'
@@ -302,7 +291,7 @@ classdef BcflashSolver < solvers.NlpSolver
                         'No. of calls to gradient', t2);
                     self.printf(' %-27s  %6i     %-22s  %10.2e\n', ...
                         'No. of Hessian-vector prods', ...
-                        self.nlp.ncalls_hvp, ...
+                        self.nlp.ncalls_hvp + self.nlp.ncalls_hes, ...
                         'No. of successful iters', ...
                         self.nSuccessIter);
                     self.printf('\n');
@@ -314,7 +303,7 @@ classdef BcflashSolver < solvers.NlpSolver
                     self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
                         '(%3d%%)\n'], 'Time: function evals' , t1, t1t, ...
                         'gradient evals', t2, t2t);
-                    t1 = self.nlp.time_hvp;
+                    t1 = self.nlp.time_hvp + self.nlp.time_hes;
                     t1t = round(100 * t1 / tt);
                     self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
                         '(%3d%%)\n'], 'Time: Hessian-vec prods', t1, ...

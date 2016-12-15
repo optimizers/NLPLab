@@ -79,13 +79,13 @@ classdef PqnSolver < solvers.NlpSolver
         EXIT_MSG = { ...
             ['First-Order Optimality Conditions Below aOptTol at', ...
             ' Initial Point\n'], ...                                    % 1
-            'Directional Derivative below progTol\n', ...              % 2
-            'First-Order Optimality Conditions Below aOptTol\n', ...   % 3
-            'Step size below progTol\n', ...                           % 4
-            'Function value changing by less than progTol\n', ...      % 5
+            'Directional Derivative below progTol\n', ...               % 2
+            'First-Order Optimality Conditions Below aOptTol\n', ...    % 3
+            'Step size below progTol\n', ...                            % 4
+            'Function value changing by less than progTol\n', ...       % 5
             'Two consecutive linesearches have failed\n', ...           % 6
-            'Function Evaluations exceeds maxIter\n', ...              % 7
-            'Number of projections exceeds maxProject\n', ...          % 8
+            'Function Evaluations exceeds maxIter\n', ...               % 7
+            'Number of projections exceeds maxProject\n', ...           % 8
             'Maximal number of iterations reached\n', ...               % 9
             };
         LOG_HEADER = {'Iteration', 'Inner Iter', 'FunEvals', ...
@@ -179,7 +179,6 @@ classdef PqnSolver < solvers.NlpSolver
             
             % Setting counters
             self.nProj = 0;
-            self.nObjFunc = 0;
             self.iter = 1;
             self.spgIter = 0;
             % Boolean for linesearch failure, a first failure will cause
@@ -194,9 +193,9 @@ classdef PqnSolver < solvers.NlpSolver
             
             % Evaluate initial parameters
             if ~strcmp(self.hess, 'lbfgs')
-                [f, g, H] = self.obj(x);
+                [f, g, H] = self.nlp.obj(x);
             else
-                [f, g] = self.obj(x);
+                [f, g] = self.nlp.obj(x);
             end
             
             self.rOptTol = self.aOptTol * norm(g);
@@ -289,7 +288,7 @@ classdef PqnSolver < solvers.NlpSolver
                 else
                     xNew = x + t * d;
                 end
-                [fNew, gNew] = self.obj(xNew);
+                [fNew, gNew] = self.nlp.obj(xNew);
                 
                 % Backtracking Line Search
                 fOld = f;
@@ -305,7 +304,7 @@ classdef PqnSolver < solvers.NlpSolver
                 if strcmp(self.hess, 'exact') && ~failed
                     % If the linesearch computed a new point, re-evaluate
                     % the hessian (not done in backtracking)
-                    [~, ~, H] = self.obj(x);
+                    [~, ~, H] = self.nlp.obj(x);
                 end
                 
                 % Optimality value
@@ -430,7 +429,7 @@ classdef PqnSolver < solvers.NlpSolver
                         'No. of calls to gradient', t2);
                     self.printf(' %-27s  %6i \n', ...
                         'No. of Hessian-vector prods', ...
-                        self.nlp.ncalls_hvp);
+                        self.nlp.ncalls_hvp + self.nlp.ncalls_hes);
                     self.printf('\n');
                     tt = self.solveTime;
                     t1 = self.nlp.time_fobj + self.nlp.time_fcon;
@@ -440,7 +439,8 @@ classdef PqnSolver < solvers.NlpSolver
                     self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
                         '(%3d%%)\n'], 'Time: function evals' , t1, t1t, ...
                         'gradient evals', t2, t2t);
-                    t1 = self.nlp.time_hvp; t1t = round(100 * t1/tt);
+                    t1 = self.nlp.time_hvp + self.nlp.time_hes;
+                    t1t = round(100 * t1/tt);
                     self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
                         '(%3d%%)\n'], 'Time: Hessian-vec prods', t1, ...
                         t1t, 'total solve', tt, 100);
@@ -463,24 +463,6 @@ classdef PqnSolver < solvers.NlpSolver
             %   - s: projected gradient
             % Calling project to increment projection counter
             s = self.project(x - g) - x;
-        end
-        
-        function [f, g, H] = obj(self, x)
-            %% Obj - Evaluate objective function, gradient and hessian at x
-            % Input:
-            %   - x: current point
-            % Ouputs (variable):
-            %   - f: value of the objective function at x
-            %   - g: gradient of the objective function at x
-            %   - H: hessian of the objective function at x
-            if nargout == 1
-                f = self.nlp.obj(x);
-            elseif nargout == 2
-                [f, g] = self.nlp.obj(x);
-            elseif nargout == 3
-                [f, g, H] = self.nlp.obj(x);
-            end
-            self.nObjFunc = self.nObjFunc + 1;
         end
         
         function z = project(self, x)
@@ -566,7 +548,7 @@ classdef PqnSolver < solvers.NlpSolver
                 
                 % Evaluate New Point
                 xNew = x + t * d;
-                [fNew, gNew] = self.obj(xNew);
+                [fNew, gNew] = self.nlp.obj(xNew);
                 iterLS = iterLS + 1;
             end
         end % backtracking

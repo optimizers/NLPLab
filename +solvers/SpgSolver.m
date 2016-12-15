@@ -162,12 +162,11 @@ classdef SpgSolver < solvers.NlpSolver
             self.iStop = 0;
             % Resetting the counters
             self.nProj = 0;
-            self.nObjFunc = 0;
             self.iter = 1;
             
             % Evaluate Initial Point
             x = self.project(self.nlp.x0);
-            [f, g] = self.obj(x);
+            [f, g] = self.nlp.obj(x);
             
             self.rOptTol = self.aOptTol * norm(g);
             self.rFeasTol = self.aFeasTol * abs(f);
@@ -247,7 +246,7 @@ classdef SpgSolver < solvers.NlpSolver
                     xNew = x + t * d;
                 end
                 
-                [fNew, gNew] = self.obj(xNew);
+                [fNew, gNew] = self.nlp.obj(xNew);
                 
                 [xNew, fNew, gNew, t, ~] = self.backtracking(x, ...
                     xNew, f, fNew, g, gNew, d, t, funRef);
@@ -359,7 +358,7 @@ classdef SpgSolver < solvers.NlpSolver
                         'No. of calls to gradient', t2);
                     self.printf(' %-27s  %6i \n', ...
                         'No. of Hessian-vector prods', ...
-                        self.nlp.ncalls_hvp);
+                        self.nlp.ncalls_hvp + self.nlp.ncalls_hes);
                     self.printf('\n');
                     tt = self.solveTime;
                     t1 = self.nlp.time_fobj + self.nlp.time_fcon;
@@ -369,7 +368,8 @@ classdef SpgSolver < solvers.NlpSolver
                     self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
                         '(%3d%%)\n'], 'Time: function evals' , t1, t1t, ...
                         'gradient evals', t2, t2t);
-                    t1 = self.nlp.time_hvp; t1t = round(100 * t1/tt);
+                    t1 = self.nlp.time_hvp + self.nlp.time_hes;
+                    t1t = round(100 * t1/tt);
                     self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
                         '(%3d%%)\n'], 'Time: Hessian-vec prods', t1, ...
                         t1t, 'total solve', tt, 100);
@@ -392,25 +392,6 @@ classdef SpgSolver < solvers.NlpSolver
             %   - s: projected gradient
             % Calling project to increment projection counter
             s = self.project(x - g) - x;
-        end
-        
-        function [f, g, H] = obj(self, x)
-            %% Obj - Evaluate objective function, gradient and hessian at x
-            % Input:
-            %   - x: current point
-            % Ouputs (variable):
-            %   - f: value of the objective function at x
-            %   - g: gradient of the objective function at x
-            %   - H: hessian of the objective function at x
-            
-            if nargout == 1
-                f = self.nlp.obj(x);
-            elseif nargout == 2
-                [f, g] = self.nlp.obj(x);
-            elseif nargout == 3
-                [f, g, H] = self.nlp.obj(x);
-            end
-            self.nObjFunc = self.nObjFunc + 1;
         end
         
         function z = project(self, x)
@@ -451,7 +432,7 @@ classdef SpgSolver < solvers.NlpSolver
                     xNew = x + t * d;
                 end
                 
-                [fNew, gNew] = self.obj(xNew);
+                [fNew, gNew] = self.nlp.obj(xNew);
                 iterLS = iterLS + 1;
             end
         end % backtracking

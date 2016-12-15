@@ -47,6 +47,16 @@ outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
     solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
     solver.solveTime);
 
+%% Solve using Pnb
+import solvers.PnbSolver;
+solver = PnbSolver(quadModel, 'optTol', 1e-10, 'maxIter', 1e4);
+solver = solver.solve();
+
+nrmSol = norm(xRef - solver.x);
+outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
+    solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
+    solver.solveTime);
+
 %% Solve using SPG (works only if prob is quadratic)
 import solvers.SpgSolver;
 solver = SpgSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...

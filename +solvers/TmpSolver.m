@@ -167,7 +167,6 @@ classdef TmpSolver < solvers.NlpSolver
             
             % Setting counters and exit flag, will exit if not 0
             self.iStop = 0;
-            self.nObjFunc = 0;
             self.iter = 1;
             
             % Output Log
@@ -183,7 +182,7 @@ classdef TmpSolver < solvers.NlpSolver
                     strcmp(self.method, 'minres') || ...
                     strcmp(self.method, 'pcg') || ...
                     strcmp(self.method, 'lsqr')
-                [f, g, H] = self.obj(x);
+                [f, g, H] = self.nlp.obj(x);
                 if strcmp(self.method, 'newton') && ~isnumeric(H)
                     error('Hessian must be explicit if newton is used');
                 end
@@ -200,7 +199,7 @@ classdef TmpSolver < solvers.NlpSolver
                 secondOrder = 1;
             elseif strcmp(self.method, 'lbfgs') || strcmp(self.method, ...
                     'bfgs') || strcmp(self.method, 'sd')
-                [f, g] = self.obj(x);
+                [f, g] = self.nlp.obj(x);
                 secondOrder = 0;
             else
                 error(['Unrecognized method to compute the descent', ...
@@ -283,7 +282,7 @@ classdef TmpSolver < solvers.NlpSolver
                 % Evaluate the objective and projected gradient at the
                 % initial step
                 xNew = self.project(x + t * d);
-                [fNew, gNew] = self.obj(xNew);
+                [fNew, gNew] = self.nlp.obj(xNew);
                 
                 % Check sufficient decrease condition and do a linesearch
                 fOld = f;
@@ -300,7 +299,7 @@ classdef TmpSolver < solvers.NlpSolver
                 
                 % If necessary, compute Hessian
                 if secondOrder && ~failLS
-                    [~, ~, H] = self.obj(x);
+                    [~, ~, H] = self.nlp.obj(x);
                 end
                 
                 % Optimality value
@@ -375,7 +374,8 @@ classdef TmpSolver < solvers.NlpSolver
                     self.printf('%s\n\n', ['*', repmat('-',1,58), '*']);
                     self.printf(self.nlp.formatting())
                     self.printf('\nParameters\n----------\n')
-                    self.printf('%-15s: %3s %8i', 'maxIter', '', self.maxIter);
+                    self.printf('%-15s: %3s %8i', 'maxIter', '', ...
+                        self.maxIter);
                     
                     self.printf('\t%-15s: %3s %8.1e\n', ' aOptTol', '', ...
                         self.aOptTol);
@@ -383,10 +383,12 @@ classdef TmpSolver < solvers.NlpSolver
                         self.suffDec);
                     self.printf('\t%-15s: %3s %8d\n', ' maxIterLS', '', ...
                         self.maxIterLS);
-                    self.printf('%-15s: %3s %8s', 'method', '', self.method);
-                    self.printf('\t%-15s: %3s %8d\n', ' corrections', '', ...
-                        self.corrections);
-                    self.printf('%-15s: %3s %8d', 'damped', '', self.damped);
+                    self.printf('%-15s: %3s %8s', 'method', '', ...
+                        self.method);
+                    self.printf('\t%-15s: %3s %8d\n', ' corrections', ...
+                        '', self.corrections);
+                    self.printf('%-15s: %3s %8d', 'damped', '', ...
+                        self.damped);
                     self.printf('\n');
                 case 'footer'
                     % Print footer
@@ -400,7 +402,8 @@ classdef TmpSolver < solvers.NlpSolver
                         'No. of calls to objective' , t1, ...
                         'No. of calls to gradient', t2);
                     self.printf(' %-27s  %6i \n', ...
-                        'No. of Hessian-vector prods', self.nlp.ncalls_hvp);
+                        'No. of Hessian-vector prods', ...
+                        self.nlp.ncalls_hvp + self.nlp.ncalls_hes);
                     self.printf('\n');
                     tt = self.solveTime;
                     t1 = self.nlp.time_fobj + self.nlp.time_fcon;
@@ -410,10 +413,11 @@ classdef TmpSolver < solvers.NlpSolver
                     self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
                         '(%3d%%)\n'], 'Time: function evals' , t1, t1t, ...
                         'gradient evals', t2, t2t);
-                    t1 = self.nlp.time_hvp; t1t = round(100 * t1/tt);
+                    t1 = self.nlp.time_hvp + self.nlp.time_hes; 
+                    t1t = round(100 * t1/tt);
                     self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
-                        '(%3d%%)\n'], 'Time: Hessian-vec prods', t1, t1t, ...
-                        'total solve', tt, 100);
+                        '(%3d%%)\n'], 'Time: Hessian-vec prods', t1, ...
+                        t1t, 'total solve', tt, 100);
                 otherwise
                     error('Unrecognized case in printHeaderFooter');
             end % switch
@@ -428,25 +432,6 @@ classdef TmpSolver < solvers.NlpSolver
             %% Project - project x on the bounds
             % Upper and lower bounds are defined in nlp model
             x = min(max(x, self.nlp.bL), self.nlp.bU);
-        end
-        
-        function [f, g, H] = obj(self, x)
-            %% Obj - Evaluate objective function, gradient and hessian at x
-            % Input:
-            %   - x: current point
-            % Ouputs (variable):
-            %   - f: value of the objective function at x
-            %   - g: gradient of the objective function at x
-            %   - H: hessian of the objective function at x
-            
-            if nargout == 1
-                f = self.nlp.obj(x);
-            elseif nargout == 2
-                [f, g] = self.nlp.obj(x);
-            elseif nargout == 3
-                [f, g, H] = self.nlp.obj(x);
-            end
-            self.nObjFunc = self.nObjFunc + 1;
         end
         
         function x = gpstep(self, x, g)
@@ -488,7 +473,7 @@ classdef TmpSolver < solvers.NlpSolver
                 % Evaluate new point
                 xNew = self.project(x + t * d);
                 % Evaluate objective function and gradient at new point
-                [fNew, gNew] = self.obj(xNew);
+                [fNew, gNew] = self.nlp.obj(xNew);
                 iterLS = iterLS + 1;
             end
         end % backtracking
