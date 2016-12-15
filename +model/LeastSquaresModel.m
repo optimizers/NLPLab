@@ -1,9 +1,12 @@
 classdef LeastSquaresModel < model.NlpModel
-    %% Norm-2 least squares problem under linear constraints or bounds
+    %% LeastSquaresModel - Norm-2 linear least squares problem
+    % Under linear constraints or bounds
     % min_x     1/2 * || A*x - b ||^2
     %           cL <= C * x <= cU
     %           bL <= x <= bU
-    
+    %
+    % LeastSquaresModel(A, b, C, cL, cU, bL, bU, *x0, *name)
+    % where * denotes optional arguments
     
     %% Properties
     properties (SetAccess = private, Hidden = false)
