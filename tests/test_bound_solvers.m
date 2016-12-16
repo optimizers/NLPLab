@@ -19,14 +19,14 @@ addpath('~/Masters/optimization/box_project');
 %% Building the model
 import model.BoundProjQpModel;
 % Quadratic objective function, upper and lower bounds
-m = 10;
+m = 5e3;
 n = m;
-Q = randi(3, m, n);
+Q = randi(1, m, n);
 Q = Q' * Q;
-c = -round(10 * rand(n, 1));
-bL = -1 * ones(n, 1);
-bU = 5 * ones(n, 1);
-bU(1:3:end) = 1;
+c = -randi(10, n, 1);
+bL = -10 * ones(n, 1);
+bU = 50 * ones(n, 1);
+bU(1:3:end) = 1e2;
 x0 = zeros(n, 1);
 cL = -inf(n, 1);
 cU = inf(n, 1);
@@ -39,7 +39,7 @@ xRef = quadprog(Q, c, [], [], [], [], bL, bU);
 %% Solve using TMP
 import solvers.TmpSolver;
 solver = TmpSolver(quadModel, 'method', 'pcg', 'aOptTol', 1e-10, ...
-    'aFeasTol', 1e-15, 'maxIter', 1e4);
+    'aFeasTol', 1e-15, 'maxIter', 1e4, 'verbose', 1);
 solver = solver.solve();
 
 nrmSol = norm(xRef - solver.x);
@@ -49,7 +49,8 @@ outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
 
 %% Solve using Pnb
 import solvers.PnbSolver;
-solver = PnbSolver(quadModel, 'optTol', 1e-10, 'maxIter', 1e4);
+solver = PnbSolver(quadModel, 'optTol', 1e-10, 'maxIter', 1e4, ...
+    'verbose', 1);
 solver = solver.solve();
 
 nrmSol = norm(xRef - solver.x);
@@ -60,7 +61,7 @@ outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
 %% Solve using SPG (works only if prob is quadratic)
 import solvers.SpgSolver;
 solver = SpgSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
-     'maxIter', 1e4);
+     'maxIter', 1e4, 'verbose', 1);
 solver = solver.solve();
 
 nrmSol = norm(xRef - solver.x);
@@ -71,7 +72,7 @@ outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
 %% Solve using PQN
 import solvers.PqnSolver;
 solver = PqnSolver(quadModel, 'hess', 'exact', 'aOptTol', 1e-10, ...
-    'progTol', 1e-15, 'aFeasTol', 1e-15, 'maxIter', 1e4);
+    'progTol', 1e-15, 'aFeasTol', 1e-15, 'maxIter', 1e4, 'verbose', 1);
 solver = solver.solve();
 
 nrmSol = norm(xRef - solver.x);
@@ -82,7 +83,7 @@ outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
 %% Solve using bcflash
 import solvers.BcflashSolver;
 solver = BcflashSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
-     'maxIter', 1e4);
+     'maxIter', 1e4, 'verbose', 1);
 solver = solver.solve();
 
 nrmSol = norm(xRef - solver.x);
@@ -93,7 +94,7 @@ outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
 %% Solve using L-BFGS-B
 import solvers.LbfgsbSolver;
 solver = LbfgsbSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
-    'maxIter', 1e4);
+    'maxIter', 1e4, 'verbose', 1);
 solver = solver.solve();
 
 nrmSol = norm(xRef - solver.x);
