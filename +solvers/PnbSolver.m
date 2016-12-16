@@ -28,12 +28,14 @@ classdef PnbSolver < handle
         nHess;
         % optTol relative to the initial gradient norm
         stopTol;
+        relFuncTol;
     end
     
     properties (Access = private, Hidden = false)
         verbose; % 0, 1 or 2
         % Note: optTol := || P[x - g] - x ||
         optTol; % Optimality tolerance in the main problem
+        funcTol;
         maxIter; % Maximum number of iterations
         maxEval; % Maximum number of calls to objective function
         suffDec; % Sufficient decrease coefficient in line search
@@ -50,7 +52,7 @@ classdef PnbSolver < handle
             ['All variables are at their bound and no further', ...
             ' progress is possible\n'], ...                             % 1
             'All working variables satisfy optimality condition\n', ... % 2
-            'Function value changing by less than optTol\n', ...        % 3
+            'Function value changing by less than funcTol\n', ...        % 3
             'Function Evaluations exceeds maxEval\n', ...               % 4
             'Maximum number of iterations reached\n', ...               % 5
             'Maximum number of iterations in line search reached\n', ...% 6
@@ -77,6 +79,7 @@ classdef PnbSolver < handle
             p.addParameter('maxEval', 5e2);
             p.addParameter('suffDec', 1e-4);
             p.addParameter('maxIterLS', 50); % Max iters for line search
+            p.addParameter('funcTol', eps);
             p.addParameter('fid', 1);
             
             p.parse(varargin{:});
@@ -86,6 +89,7 @@ classdef PnbSolver < handle
             self.maxEval = p.Results.maxEval;
             self.suffDec = p.Results.suffDec;
             self.maxIterLS = p.Results.maxIterLS;
+            self.funcTol = p.Results.funcTol;
             self.fid = p.Results.fid;
         end % constructor
         
@@ -107,8 +111,11 @@ classdef PnbSolver < handle
             % Getting obj. func, gradient and hessian at x
             [f, g, H] = self.nlp.obj(x);
             
+            fOld = Inf;
+            
             % Relative stopping tolerance
             self.stopTol = self.optTol * norm(g);
+            self.relFuncTol = self.funcTol * abs(f);
             
             %% Main loop
             while self.iStop == 0
@@ -120,19 +127,23 @@ classdef PnbSolver < handle
                 pgnrm = norm(g(working));
                 
                 % Output log
+                self.nObjFunc = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
                 if self.verbose >= 2
-                    fprintf(self.LOG_BODY, self.iter, ...
-                        self.nlp.ncalls_fobj + self.nlp.ncalls_fcon, f, ...
+                    fprintf(self.LOG_BODY, self.iter, self.nObjFunc, f, ...
                         pgnrm, sum(working));
                 end
                 
                 % Checking various stopping conditions, exit if true
                 if isempty(working)
+                    self.iStop = 1;
+                elseif pgnrm < self.stopTol + self.optTol
+                    self.iStop = 2;
+                elseif abs(f - fOld) < self.relFuncTol + self.funcTol
+                    self.iStop = 3;
+                elseif self.nObjFunc >= self.maxEval
                     self.iStop = 4;
-                elseif pgnrm <= self.stopTol + self.optTol
-                    self.iStop = 5;
                 elseif self.iter >= self.maxIter
-                    self.iStop = 6;
+                    self.iStop = 5;
                 end
                 
                 if self.iStop ~= 0
@@ -157,14 +168,11 @@ classdef PnbSolver < handle
                 % Compute restricted projected Armijo line search
                 xNew = self.restrictedArmijo(xNew, f, x, g, d, working);
                 
-                % Checking if iStop changed in case line search failed
-                if self.iStop ~= 0
-                    % Exiting here saves time
-                    break
-                end
-                
                 % Taking step, restore x to full-sized
                 x = xNew;
+                
+                % Saving old f to check progression
+                fOld = f;
                 
                 % Updating objective function, gradient and hessian
                 [f, g, H] = self.nlp.obj(x);
@@ -185,7 +193,7 @@ classdef PnbSolver < handle
             self.solved = ~(self.iStop == 8 || self.iStop == 9);
             
             if self.verbose
-                self.printf('\nEXIT TMP: %s\nCONVERGENCE: %d\n', ...
+                self.printf('\nEXIT PNB: %s\nCONVERGENCE: %d\n', ...
                     self.EXIT_MSG{self.iStop}, self.solved);
                 self.printf('||Pg|| = %8.1e\n', self.pgNorm);
                 self.printf('Stop tolerance = %8.1e\n', self.stopTol);
