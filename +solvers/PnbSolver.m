@@ -41,6 +41,8 @@ classdef PnbSolver < handle
         suffDec; % Sufficient decrease coefficient in line search
         maxIterLS; % Maximal number of iterations in the line search
         fid;
+        
+        lsFunc; % Line search function
     end
     
     properties (Hidden = true, Constant)
@@ -52,7 +54,7 @@ classdef PnbSolver < handle
             ['All variables are at their bound and no further', ...
             ' progress is possible\n'], ...                             % 1
             'All working variables satisfy optimality condition\n', ... % 2
-            'Function value changing by less than funcTol\n', ...        % 3
+            'Function value changing by less than funcTol\n', ...       % 3
             'Function Evaluations exceeds maxEval\n', ...               % 4
             'Maximum number of iterations reached\n', ...               % 5
             'Maximum number of iterations in line search reached\n', ...% 6
@@ -80,6 +82,7 @@ classdef PnbSolver < handle
             p.addParameter('suffDec', 1e-4);
             p.addParameter('maxIterLS', 50); % Max iters for line search
             p.addParameter('funcTol', eps);
+            p.addParameter('exactLS', false);
             p.addParameter('fid', 1);
             
             p.parse(varargin{:});
@@ -91,12 +94,25 @@ classdef PnbSolver < handle
             self.maxIterLS = p.Results.maxIterLS;
             self.funcTol = p.Results.funcTol;
             self.fid = p.Results.fid;
+            
+            % Exact line search is only implemented for quadratic or least
+            % squares models
+            if p.Results.exactLS && ...
+                    (isa(self.nlp, 'model.LeastSquaresModel') || ...
+                    isa(self.nlp, 'model.QpModel'))
+                self.lsFunc = @(xNew, f, x, g, d, H, working) ...
+                    self.restrictedExact(xNew, f, x, g, d, H, working);
+            else
+                % Otherwise, default to Armijo
+                self.lsFunc = @(xNew, f, x, g, d, H, working) ...
+                    self.restrictedArmijo(xNew, f, x, g, d, H, working);
+            end
         end % constructor
         
         function self = solve(self)
-            %% Solve using the PQN-NNLS algorithm
+            %% Solve using the Projected Newton for bounds algorithm
             self.solveTime = tic;
-            self.iter = 1;
+            self.iter = 0;
             self.iStop = 0;
             
             % Output Log
@@ -162,11 +178,10 @@ classdef PnbSolver < handle
                 % Compute Newton direction for free variables only
                 d = self.newtonDir(g, H);
                 
-                % Trial step P[x + d] on working variables only
-                xNew(working) = self.projectSel(x - d, working);
-                
                 % Compute restricted projected Armijo line search
-                xNew = self.restrictedArmijo(xNew, f, x, g, d, working);
+                xNew = self.lsFunc(xNew, f, x, g, d, H, working);
+                %                 xNew = self.restrictedArmijo(xNew, f, x, g, d, H, working);
+                %                 xNew = self.restrictedExact(xNew, f, x, g, d, H, working);
                 
                 % Taking step, restore x to full-sized
                 x = xNew;
@@ -251,7 +266,7 @@ classdef PnbSolver < handle
                     self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
                         '(%3d%%)\n'], 'Time: function evals' , t1, t1t, ...
                         'gradient evals', t2, t2t);
-                    t1 = self.nlp.time_hvp + self.nlp.time_hes; 
+                    t1 = self.nlp.time_hvp + self.nlp.time_hes;
                     t1t = round(100 * t1/tt);
                     self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
                         '(%3d%%)\n'], 'Time: Hessian-vec prods', t1, ...
@@ -326,20 +341,22 @@ classdef PnbSolver < handle
             [d, ~] = pcg(H, g, max(1e-5 * self.optTol, 1e-12));
         end
         
-        function xNew = restrictedArmijo(self, xNew, f, x, g, d, working)
+        function xNew = restrictedArmijo(self, xNew, f, x, g, d, ~, ...
+                working)
             %% RestrictedArmijo - Armijo line search on the restricted vars
             % Perform a projected Armijo line search on the reduced
             % variables according to 'working'. This function assumes that
             % freeX, freeG and freeH are already reduced. However, xNew
             % must be full-sized since calls will be made to the objective
             % function.
-            
             iterLS = 1;
             t = 1;
-            fNew = self.nlp.obj(xNew);
-            
             while true
-                
+                % Recompute trial step on free variables
+                xNew(working) = self.projectSel(x - t * d, working);
+                % Update objective function value
+                fNew = self.nlp.obj(xNew);
+                % Checking exit conditions
                 if (f - fNew) >= (self.suffDec * t * g' * d)
                     % Armijo condition satisfied
                     return;
@@ -348,16 +365,21 @@ classdef PnbSolver < handle
                     self.iStop = 6;
                     return;
                 end
-                
                 % Decrease step size
                 t = t / 2;
-                % Recompute trial step on free variables
-                xNew(working) = self.projectSel(x - t * d, working);
-                % Update objective function value
-                fNew = self.nlp.obj(xNew);
-                
                 iterLS = iterLS + 1;
             end
+        end
+        
+        function xNew = restrictedExact(self, xNew, ~, x, g, d, H, working)
+            %% RestrictedExact
+            % Exact line search restricted to the free variables. xNew is
+            % projected at the end to ensure the value remains within the
+            % bounds.
+            % Step length must stay between 0 and 1
+            t = min(max((d' * g) / (d' * H * d), eps), 1);
+            % Take step and project to make sure bounds are satisfied
+            xNew(working) = self.projectSel(x - t * d, working);
         end
         
     end
