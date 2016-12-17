@@ -19,14 +19,12 @@ addpath('~/Masters/optimization/box_project');
 %% Building the model
 import model.BoundProjQpModel;
 % Quadratic objective function, upper and lower bounds
-m = 5e3;
+m = 5e2;
 n = m;
-Q = randi(1, m, n);
-Q = Q' * Q;
-c = -randi(10, n, 1);
-bL = -10 * ones(n, 1);
-bU = 50 * ones(n, 1);
-bU(1:3:end) = 1e2;
+Q = 5 * eye(m);
+c = -randi(1000, n, 1);
+bL = -(n : -1 : 1)';
+bU = 1e-1 * (1 : n)';
 x0 = zeros(n, 1);
 cL = -inf(n, 1);
 cU = inf(n, 1);
@@ -39,7 +37,7 @@ xRef = quadprog(Q, c, [], [], [], [], bL, bU);
 %% Solve using TMP
 import solvers.TmpSolver;
 solver = TmpSolver(quadModel, 'method', 'pcg', 'aOptTol', 1e-10, ...
-    'aFeasTol', 1e-15, 'maxIter', 1e4, 'verbose', 1);
+    'aFeasTol', 1e-15, 'maxIter', 1e4, 'verbose', 2);
 solver = solver.solve();
 
 nrmSol = norm(xRef - solver.x);
@@ -50,7 +48,7 @@ outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
 %% Solve using Pnb
 import solvers.PnbSolver;
 solver = PnbSolver(quadModel, 'optTol', 1e-10, 'maxIter', 1e4, ...
-    'verbose', 1);
+    'verbose', 2, 'exactLS', true);
 solver = solver.solve();
 
 nrmSol = norm(xRef - solver.x);
@@ -58,49 +56,49 @@ outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
     solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
     solver.solveTime);
 
-%% Solve using SPG (works only if prob is quadratic)
-import solvers.SpgSolver;
-solver = SpgSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
-     'maxIter', 1e4, 'verbose', 1);
-solver = solver.solve();
-
-nrmSol = norm(xRef - solver.x);
-outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
-    solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
-    solver.solveTime);
-
-%% Solve using PQN
-import solvers.PqnSolver;
-solver = PqnSolver(quadModel, 'hess', 'exact', 'aOptTol', 1e-10, ...
-    'progTol', 1e-15, 'aFeasTol', 1e-15, 'maxIter', 1e4, 'verbose', 1);
-solver = solver.solve();
-
-nrmSol = norm(xRef - solver.x);
-outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
-    solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
-    solver.solveTime);
-
-%% Solve using bcflash
-import solvers.BcflashSolver;
-solver = BcflashSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
-     'maxIter', 1e4, 'verbose', 1);
-solver = solver.solve();
-
-nrmSol = norm(xRef - solver.x);
-outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
-    solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
-    solver.solveTime);
-
-%% Solve using L-BFGS-B
-import solvers.LbfgsbSolver;
-solver = LbfgsbSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
-    'maxIter', 1e4, 'verbose', 1);
-solver = solver.solve();
-
-nrmSol = norm(xRef - solver.x);
-outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
-    solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
-    solver.solveTime);
+% %% Solve using SPG (works only if prob is quadratic)
+% import solvers.SpgSolver;
+% solver = SpgSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
+%      'maxIter', 1e4, 'verbose', 1);
+% solver = solver.solve();
+% 
+% nrmSol = norm(xRef - solver.x);
+% outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
+%     solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
+%     solver.solveTime);
+% 
+% %% Solve using PQN
+% import solvers.PqnSolver;
+% solver = PqnSolver(quadModel, 'hess', 'exact', 'aOptTol', 1e-10, ...
+%     'progTol', 1e-15, 'aFeasTol', 1e-15, 'maxIter', 1e4, 'verbose', 1);
+% solver = solver.solve();
+% 
+% nrmSol = norm(xRef - solver.x);
+% outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
+%     solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
+%     solver.solveTime);
+% 
+% %% Solve using bcflash
+% import solvers.BcflashSolver;
+% solver = BcflashSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
+%      'maxIter', 1e4, 'verbose', 1);
+% solver = solver.solve();
+% 
+% nrmSol = norm(xRef - solver.x);
+% outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
+%     solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
+%     solver.solveTime);
+% 
+% %% Solve using L-BFGS-B
+% import solvers.LbfgsbSolver;
+% solver = LbfgsbSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
+%     'maxIter', 1e4, 'verbose', 1);
+% solver = solver.solve();
+% 
+% nrmSol = norm(xRef - solver.x);
+% outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
+%     solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
+%     solver.solveTime);
 
 %% Printing
 fprintf('\n\n\n');
