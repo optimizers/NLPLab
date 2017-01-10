@@ -17,7 +17,6 @@ addpath('~/Masters/optimization/lbfgsb');
 addpath('~/Masters/optimization/box_project');
 
 %% Building the model
-import model.BoundProjQpModel;
 % Quadratic objective function, upper and lower bounds
 m = 5e2;
 n = m;
@@ -30,6 +29,8 @@ x0 = zeros(n, 1);
 cL = -inf(n, 1);
 cU = inf(n, 1);
 A = [];
+
+import model.BoundProjQpModel;
 quadModel = BoundProjQpModel(Q, c, A, cL, cU, bL, bU, x0, '');
 
 %% MATLAB's quadprog is the reference solution

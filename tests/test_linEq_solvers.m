@@ -15,7 +15,7 @@ addpath('~/Masters/logging4matlab/');
 addpath('~/Masters/Spot');
 
 %% Building the model
-% Quadratic objective function, linear inequalities
+% Quadratic objective function, linear equalities
 m = 5e2;
 n = m;
 Q = diag(50 * ones(m - 1, 1), -1) + diag(100 * ones(m, 1), 0) + ...
@@ -24,12 +24,12 @@ c = -randi(1000, n, 1);
 bL = -inf(n, 1);
 bU = inf(n, 1);
 x0 = zeros(n, 1);
-cL = -50 * ones(n, 1);
-cU = -cL + randi(10, n, 1);
+cL = 5 * ones(n, 1);
+cU = cL;
 A = randi(10, m, n);
 
-import model.LinIneqProjQpModel;
-quadModel = LinIneqProjQpModel(Q, c, A, cL, cU, bL, bU, x0, '');
+import model.LinEqProjQpModel;
+quadModel = LinEqProjQpModel(Q, c, A, cL, cU, bL, bU, x0, '');
 
 %% MATLAB's quadprog is the reference solution
 xRef = quadprog(Q, c, [A; -A], [cU; -cL]);
@@ -49,17 +49,6 @@ outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
 import solvers.PqnSolver;
 solver = PqnSolver(quadModel, 'hess', 'exact', 'aOptTol', 1e-10, ...
     'progTol', 1e-15, 'aFeasTol', 1e-15, 'maxIter', 1e4, 'verbose', 1);
-solver = solver.solve();
-
-nrmSol = norm(xRef - solver.x);
-outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
-    solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
-    solver.solveTime);
-
-%% Solve using Cflash
-import solvers.CflashSolver;
-solver = CflashSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
-    'maxIter', 1e4, 'verbose', 1);
 solver = solver.solve();
 
 nrmSol = norm(xRef - solver.x);
