@@ -1,0 +1,21 @@
+                Solver &   Range &   #iter &     \#f &     \#g &     \#H &    |Pg| &      RT \\
+   solvers.TmpSolver lsqr  &          75  &          25  &          25  &          25  &        4445  &     1.5e-03  &     7.0e+00   \  
+   solvers.TmpSolver lsmr  &          75  &          24  &          24  &          24  &        3608  &     1.6e-03  &     5.5e+00   \  
+    solvers.TmpSolver pcg  &          75  &          18  &          42  &          42  &         501  &     1.1e-04  &     9.4e-01   \  
+ solvers.TmpSolver minres  &          75  &          23  &          47  &          47  &        3491  &     1.6e-10  &     6.2e+00   \  
+        solvers.PnbSolver  &          75  &          21  &          43  &          22  &        1033  &     3.8e-06  &     1.8e+00       
+   solvers.TmpSolver lsqr  &          50  &          29  &          29  &          29  &        6343  &     1.8e-03  &     1.0e+01   \  
+   solvers.TmpSolver lsmr  &          50  &          28  &          28  &          28  &        5128  &     1.8e-03  &     8.1e+00   \  
+    solvers.TmpSolver pcg  &          50  &          16  &          33  &          33  &         437  &     3.7e-05  &     7.4e-01   \  
+ solvers.TmpSolver minres  &          50  &          27  &          55  &          55  &        5530  &     1.1e-09  &     1.1e+01   \  
+        solvers.PnbSolver  &          50  &          19  &          39  &          20  &         937  &     4.3e-06  &     1.7e+00       
+   solvers.TmpSolver lsqr  &          25  &          29  &          29  &          29  &        7421  &     1.3e-03  &     1.2e+01   \  
+   solvers.TmpSolver lsmr  &          25  &          28  &          28  &          28  &        5980  &     1.5e-03  &     9.6e+00   \  
+    solvers.TmpSolver pcg  &          25  &          21  &          43  &          43  &         572  &     2.7e-05  &     1.1e+00   \  
+ solvers.TmpSolver minres  &          25  &          27  &          55  &          55  &        6369  &     8.2e-10  &     1.4e+01   \  
+        solvers.PnbSolver  &          25  &          15  &          31  &          16  &         745  &     3.2e-04  &     1.4e+00       
+   solvers.TmpSolver lsqr  &           0  &           3  &           3  &           3  &         165  &     2.4e-03  &     2.3e-01   \  
+   solvers.TmpSolver lsmr  &           0  &           3  &           3  &           3  &         165  &     2.0e-03  &     2.3e-01   \  
+    solvers.TmpSolver pcg  &           0  &           3  &           7  &           7  &          86  &     2.3e-07  &     1.2e-01   \  
+ solvers.TmpSolver minres  &           0  &           2  &           5  &           5  &          96  &     7.9e-12  &     1.4e-01   \  
+        solvers.PnbSolver  &           0  &           3  &          56  &           4  &         196  &     4.0e-05  &     2.7e-01       

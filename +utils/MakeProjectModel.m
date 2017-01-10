@@ -1,7 +1,13 @@
 classdef MakeProjectModel < handle
     %% MakeProjectModel
     % Metaclass that creates subclasses of a given NlpModel providing a
-    % project function on the constraint set
+    % project function on the constraint set.
+    %
+    % To call, make sure nlplab is own MATLAB's path and:
+    % >> import utils.MakeProjectModel
+    % >> utils.MakeProjectModel('someModel', 'someProjModel')
+    % 'someModel' & 'someProjModel' must be under +model/.
+    % Done! The new model should be located under +model/
     
     
     properties (SetAccess = private)
