@@ -13,8 +13,8 @@ classdef LinEqProj < handle
             w = (C * C'') \ (-C*x);
             z = x + (C'' * w);
         end
-    
-                function z = projectSel(self, x, sel)
+        
+        function z = projectSel(self, x, sel)
             %% ProjectSel - project on lin. eq. for selected indices
             % Analytical solution of
             % min_z     1/2 * || z - x ||^2

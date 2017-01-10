@@ -1,4 +1,4 @@
-classdef ProjModel < model.NlpModel
+classdef ProjModel < model.LeastSquaresModel
     %% ProjModel - Custom model representing the projection problem
     %   This class represents the DUAL of the projection sub-problem:
     %
@@ -19,18 +19,12 @@ classdef ProjModel < model.NlpModel
     %   This model is only compatible with the structure of the tomographic
     %   reconstruction algorithm made by Poly-LION. The preconditionner
     %   should be a Precond object.
-
-
+    
+    
     %% Properties
     properties (SetAccess = private, Hidden = false)
-        % Storing the objects representing the problem
-        prec; % The preconditionner used, identity = none
-        % Internal parameters
         objSize; % Real object size according to GeoS object
-    end
-    
-    properties (Access = public)
-       xbar; 
+        prec;
     end
     
     
@@ -63,63 +57,45 @@ classdef ProjModel < model.NlpModel
             bU = inf(objSiz, 1);
             bL = zeros(objSiz, 1);
             
-            % Calling the NlpModel superclass (required for bcflash)
-            self = self@model.NlpModel('', z0, [], [], bL, bU);
+            % !!
+            % b (the vector that we wish to project) is undefined for now,
+            % it must be set prior to the call to solve() using
+            % setPointToProject.
+            % !!
+            b = [];
+            
+            % A will depend on current object's function precMult, passing
+            % a temporary value to the constructor
+            empt = sparse(objSiz, objSiz, 0);
+            
+            self = self@model.LeastSquaresModel(empt, b, empt, [], [], ...
+                bL, bU, z0);
             
             % Initializing input parameters
-            self.prec = prec;
             self.objSize = objSiz;
-        end
-        
-        % Override NLP model's default functions
-        function [fObj, grad, hess] = obj(self, z)
-            %% Function returning the obj. func, grad. and hess.
-            % min   1/2 || C'z + \bar{x} ||^2
-            % <=>
-            % min   1/2 z'*C*C'*z + 1/2 \bar{x}'*\bar{x} + z'*C*\bar{x}
-            %  z
-            % s.c.  z >= 0
-            % where z is the lagrange multiplier. The previous problem is
-            % the dual of the projection problem {x | Cx >= 0}.
-            %
-            % The primal problem is
-            % min   1/2 || x - \bar{x} ||^2
-            %  x
-            % s.c.  C*x >= 0
+            self.prec = prec;
             
-            if nargout == 1
-                fObj = self.fobj(z);
-            elseif nargout == 2
-                [fObj, grad] = self.fgobj(z);
-            else % nargout == 3
-                [fObj, grad] = self.fgobj(z);
-                % Build a Spot op such that its product is
-                % hessian(z) * v
-                hess = self.hobj(z);
-            end
+            % Updating A once the object exists
+            self.A = opFunction(objSiz, objSiz, ...
+                @(z, mode) self.precMult(z, mode));
         end
         
-        function f = fobj_local(self, z)
-            %% Computes the obj. func. of the projection problem
-            f = real(0.5*(z'*self.prec.Direct(self.prec.Adjoint(z) + ...
-                2*self.xbar) + self.xbar'*self.xbar));
+        function setPointToProject(self, xbar)
+            %% Set xbar as b in the obj. func. 1/2 * || A*x - b ||^2
+            self.b = xbar;
         end
         
-        function g = gobj_local(self, z)
-            %% Computes the gradient of the projeciton problems
-            g = real(self.prec.Direct(self.prec.Adjoint(z) + self.xbar));
+        function xProj = dualToPrimal(self, zProj)
+            %% Retrieving the original variable: x = \bar{x} + C'*z
+            xProj = self.xbar + real(self.prec.Adjoint(zProj));
         end
         
-        function [f, g] = fgobj_local(self, z)
-            %% "Efficient" computation of the gradient and obj. func.
-            % The purpose of this method is to reduce the amount of
-            % computations required by reusing part of the computations
-            % already made.
-            res = self.prec.Adjoint(z) + self.xbar;
-            f = real(0.5 * (res' * res));
-            g = real(self.prec.Direct(res));
+        function zProj = project(self, z)
+            %% Projects { z | zProj >= 0 }
+            zProj = max(z, self.bL); % min(max(z, self.bL), self.bU)
         end
         
+        %% The following functions are redefined from the parent class
         function hess = hobj_local(self, z)
             %% Computes the hessian of the proj. obj. func.
             % Hessian is symetric, so there is no need to carry the mode
@@ -139,29 +115,21 @@ classdef ProjModel < model.NlpModel
             H = real(self.prec.AdjointDirect(v));
         end
         
-        function H = hlag_local(self, x, ~)
-            %% Computes the hessian of the lagrangian
-            % Considering all constraints are linear, the hessian of the
-            % lagrangian is the hessian of the objective function
-            H = self.hobj_local(x);
-        end
+    end
+    
+    
+    %% Private methods
+    methods (Access = private)
         
-        function w = hlagprod_local(self, ~, ~, v)
-            %% Computes the hessian of the lagrangian times vector
-            % bcflash doesn't require a Spot operator. We directly call
-            % hobj_prod. The hessian of the lagrangian of the problem is
-            % the hessian of the objective function, CC'.
-            w = self.hobjprod_local([], [], v);
-        end
-        
-        function xProj = dualToPrimal(self, zProj)
-            %% Retrieving the original variable: x = \bar{x} + C'*z
-            xProj = self.xbar + real(self.prec.Adjoint(zProj));
-        end
-        
-        function zProj = project(self, z)
-           %% Projects { z | zProj >= 0 } 
-           zProj = max(z, self.bL); % min(max(z, self.bL), self.bU)
+        function z = precMult(self, z, mode)
+            %% Evaluates C * z
+            if mode == 1
+                z = self.prec.Direct(z);
+            elseif mode == 2
+                z = self.prec.Adjoint(z);
+            end
+            z = real(z);
+            self.ncalls_hvp = self.ncalls_hvp + 1;
         end
         
     end

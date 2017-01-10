@@ -10,7 +10,7 @@ BODY_FORMAT = '%25s %10d %10d %10d %10d %10.1e %10.1e %10.1e\n';
 outInfo = {};
 
 %% Seting MATLAB's path
-addpath('~/Masters/NLPlab');
+addpath('~/Masters/nlplab');
 addpath('~/Masters/logging4matlab/');
 addpath('~/Masters/Spot');
 addpath('~/Masters/optimization/lbfgsb');

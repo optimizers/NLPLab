@@ -9,7 +9,7 @@ classdef LeastSquaresModel < model.NlpModel
     % where * denotes optional arguments
     
     %% Properties
-    properties (SetAccess = private, Hidden = false)
+    properties (SetAccess = public, Hidden = false)
         A; % Coefficient matrix
         b; % Vector of measurements
         C; % Jacobian of linear constraints
@@ -17,7 +17,7 @@ classdef LeastSquaresModel < model.NlpModel
     
     
     %% Public methods
-    methods (Access = public, Sealed = true)
+    methods (Access = public)
         
         function self = LeastSquaresModel(A, b, C, cL, cU, bL, bU, x0, ...
                 name)
@@ -62,7 +62,7 @@ classdef LeastSquaresModel < model.NlpModel
         
         function [f, g] = fgobj_local(self, x)
             %% Compute both f & g at the same time in case it's expensive
-            r = self.A*x - self.b;
+            r = self.A * x - self.b;
             f = 1/2 * (r' * r);
             g = self.A' * r;
         end
@@ -90,7 +90,7 @@ classdef LeastSquaresModel < model.NlpModel
         function w = hconprod_local(self, ~, ~, ~)
             w = sparse(self.n, 1);
         end
-        
+
     end
     
 end
