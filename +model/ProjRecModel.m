@@ -24,20 +24,16 @@ classdef ProjRecModel < model.RecModel
     
     methods (Access = public)
         
-        function self = ProjRecModel(crit, prec, sino, geos, projModel, ...
-                projSolver, projOptions, varargin)
+        function self = ProjRecModel(crit, prec, sino, geos, ...
+                projSolver, varargin)
             %% Constructor
             % Inputs:
             %   - crit: Critere object from the Poly-LION repository
             %   - prec: Precond object from the Poly-Lion repository
             %   - sino: Sinogramme object from the Poly-Lion repository
             %   - geos: Geometrie_Series object from the Poly-Lion repo
-            %   - projModel: model representing the dual of the projection
-            %   problem. It is used in the project function. NOTE: 
-            %   generally speaking, it is way easier to solve the dual of 
-            %   the projection problem than the primal.
-            %   - projSolver: solver that can receive and solve projModel.
-            %   - projOptions: struct containing projSolver's parameters.
+            %   - projSolver: solver that contains the model to solve and a
+            %   solve function.
             %   - mu0: (optional) initial vector for the reconstruction
             %   problem
             %   - name: (optional) name of the nlp model
@@ -55,23 +51,17 @@ classdef ProjRecModel < model.RecModel
             % Calling the RecModel superclass (inputs will be checked here)
             self = self@model.RecModel(crit, prec, sino, geos, mu0, name);
             
-            % Storing the options
-            self.projOptions = projOptions;
-            
             % Verifying the projModel type
-            if ~isa(projModel, 'model.ProjModel')
-                error('projModel should be a subclass of model.ProjModel');
-            elseif ~isa(projSolver, 'solvers.NLPSolver')
-               error('projSolver must be a subclass of solvers.NLPSolver');
+            if ~isa(projSolver, 'solvers.NlpSolver')
+               error('projSolver must be a subclass of solvers.NlpSolver');
             end
-            self.projModel = projModel;
             self.projSolver = projSolver;
         end
         
-        function [z, solver] = project(self, x)
-            %% Project - Call Solve from projModel
-            % This will call projModel's Solve function that solves the
-            % projection sub-problem defined in the ProjModel class.
+        function z = project(self, x)
+            %% Project - Call Solve from projSolver
+            % This will call projSolver's solve function that solves the
+            % projection sub-problem defined by the nlp model is possesses.
             % Input:
             %   - x: vector to project on C*x >= 0
             % Output:
@@ -79,12 +69,13 @@ classdef ProjRecModel < model.RecModel
             
             % Variable that we desire to project on the constraint set
             % Here x is \bar{x}
-            self.projSolver.nlp.xbar = x;
+            self.projSolver.nlp.setPointToProject(x);
             
-            solver = self.projSolver.solve();
+            % Calling the solver to solve the problem
+            self.projSolver.solve();
             
             % Finding the primal variable from the dual variable
-            z = self.projSolver.nlp.dualToPrimal(zProj);
+            z = self.projSolver.nlp.dualToPrimal(self.projSolver.x);
         end
         
     end

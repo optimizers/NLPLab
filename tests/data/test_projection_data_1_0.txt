@@ -1,0 +1,25 @@
+
+EXIT TMP: Directional derivative below aOptTol\n
+CONVERGENCE: 1
+||Pg|| =  2.5e-02
+Stop tolerance =  6.3e-08
+
+EXIT TMP: Directional derivative below aOptTol\n
+CONVERGENCE: 1
+||Pg|| =  1.4e-02
+Stop tolerance =  6.3e-08
+
+EXIT TMP: Function value changing by less than aOptTol\n
+CONVERGENCE: 1
+||Pg|| =  5.0e-06
+Stop tolerance =  6.3e-08
+
+EXIT TMP: All working variables satisfy optimality condition\n
+CONVERGENCE: 1
+||Pg|| =  3.2e-10
+Stop tolerance =  6.3e-08
+
+EXIT PNB: Maximum number of iterations in line search reached\n
+CONVERGENCE: 1
+||Pg|| =  4.1e-03
+Stop tolerance =  6.3e-08
