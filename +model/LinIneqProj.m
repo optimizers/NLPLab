@@ -23,7 +23,7 @@ classdef LinIneqProj < handle
     
     methods (Access = public)
         
-        function z = dualProject(self, x)
+        function z = project(self, x)
             %% Project on linear inequalities
             % Solves the dual of
             % min_x { 1/2 * || z - x ||^2 : cL <= C * z <= cU }
@@ -38,11 +38,9 @@ classdef LinIneqProj < handle
             %   - x: point to project
             % Output
             %   - z: projection of x
-            
-            warning('This doesn''t seem correct.');
-            
-            A = [-self.C', self.C'];
-            b = [self.cL; -self.cU];
+
+            A = [self.C', -self.C'];
+            b = [-self.cL; self.cU];
             
             temp = sum(self.iUpp + self.iLow);
             
@@ -72,9 +70,7 @@ classdef LinIneqProj < handle
             %   - x: point to project
             % Output
             %   - z: projection of x
-            
-            warning('This doesn''t seem correct.');
-            
+
             xSel = x(sel);
             C = self.C(sel, :);
             
@@ -94,7 +90,7 @@ classdef LinIneqProj < handle
             z = xSel + A * z;
         end
         
-        function z = project(self, x)
+        function z = primalproject(self, x)
             %% Project on linear inequalities
             % Solves min_x { 1/2 * || z - x ||^2 : cL <= C * z <= cU }
             % using MATLAB's lsqlin
