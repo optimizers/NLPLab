@@ -16,7 +16,7 @@ addpath('~/Masters/Spot');
 
 %% Building the model
 % Quadratic objective function, linear inequalities
-m = 5e2;
+m = 1e2;
 n = m;
 Q = diag(50 * ones(m - 1, 1), -1) + diag(100 * ones(m, 1), 0) + ...
     diag(50 * ones(m - 1, 1), 1);
@@ -37,7 +37,7 @@ xRef = quadprog(Q, c, [A; -A], [cU; -cL]);
 %% Solve using SPG (works only if prob is quadratic)
 import solvers.SpgSolver;
 solver = SpgSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
-    'progTol', 1e-15, 'maxIter', 1e4, 'verbose', 1);
+    'progTol', 1e-15, 'maxIter', 1e4, 'verbose', 2);
 solver = solver.solve();
 
 nrmSol = norm(xRef - solver.x);
@@ -48,7 +48,7 @@ outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
 %% Solve using PQN
 import solvers.PqnSolver;
 solver = PqnSolver(quadModel, 'hess', 'exact', 'aOptTol', 1e-10, ...
-    'progTol', 1e-15, 'aFeasTol', 1e-15, 'maxIter', 1e4, 'verbose', 1);
+    'progTol', 1e-15, 'aFeasTol', 1e-15, 'maxIter', 1e4, 'verbose', 2);
 solver = solver.solve();
 
 nrmSol = norm(xRef - solver.x);
@@ -56,16 +56,16 @@ outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
     solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
     solver.solveTime);
 
-%% Solve using Cflash
-import solvers.CflashSolver;
-solver = CflashSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
-    'maxIter', 1e4, 'verbose', 1);
-solver = solver.solve();
-
-nrmSol = norm(xRef - solver.x);
-outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
-    solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
-    solver.solveTime);
+% %% Solve using Cflash
+% import solvers.CflashSolver;
+% solver = CflashSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
+%     'maxIter', 1e4, 'verbose', 2);
+% solver = solver.solve();
+% 
+% nrmSol = norm(xRef - solver.x);
+% outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
+%     solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
+%     solver.solveTime);
 
 %% Printing
 fprintf('\n\n\n');
