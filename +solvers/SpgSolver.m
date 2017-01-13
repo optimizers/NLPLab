@@ -260,12 +260,16 @@ classdef SpgSolver < solvers.NlpSolver
                     pgnrm = norm(self.gpstep(x, g));
                     % Output Log with opt. cond.
                     if self.verbose >= 2
+                        self.nObjFunc = self.nlp.ncalls_fobj + ...
+                            self.nlp.ncalls_fcon;
                         fprintf(self.LOG_BODY_OPT, self.iter, ...
                             self.nObjFunc, self.nProj, t, f, pgnrm);
                     end
                 else
                     % Output Log without opt. cond.
                     if self.verbose >= 2
+                        self.nObjFunc = self.nlp.ncalls_fobj + ...
+                            self.nlp.ncalls_fcon;
                         fprintf(self.LOG_BODY, self.iter, ...
                             self.nObjFunc, self.nProj, t, f);
                     end
