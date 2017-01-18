@@ -108,7 +108,7 @@ classdef CflashSolver < solvers.NlpSolver
                 error('No project method in nlp');
             elseif ~ismethod(nlp, 'eqProject')
                 error('No eqProject method in nlp');
-            elseif ~isprop(nlp, 'normJac')
+            elseif ~isprop(nlp, 'normJac')  && ~ismethod(nlp, 'normJac')
                 error('No normJac attribute in nlp');
             end
             
@@ -605,8 +605,8 @@ classdef CflashSolver < solvers.NlpSolver
             
             % Compute the final iterate and step.
             s = self.gpstep(x, alph, w);
-            w = s;
             x = self.project(x + alph * w);
+            w = s;
         end % prsrch
         
         function [x, s, iters, info] = spcg(self, Aprod, x, g, delta, ...
