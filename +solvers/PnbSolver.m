@@ -143,14 +143,15 @@ classdef PnbSolver < handle
                 pgnrm = norm(g(working));
                 
                 % Output log
-                self.nObjFunc = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
+                self.nObjFunc = self.nlp.ncalls_fobj + ...
+                    self.nlp.ncalls_fcon;
                 if self.verbose >= 2
                     fprintf(self.LOG_BODY, self.iter, self.nObjFunc, f, ...
                         pgnrm, sum(working));
                 end
                 
                 % Checking various stopping conditions, exit if true
-                if isempty(working)
+                if ~any(working)
                     self.iStop = 1;
                 elseif pgnrm < self.stopTol + self.optTol
                     self.iStop = 2;
@@ -180,8 +181,6 @@ classdef PnbSolver < handle
                 
                 % Compute restricted projected Armijo line search
                 xNew = self.lsFunc(xNew, f, x, g, d, H, working);
-                %                 xNew = self.restrictedArmijo(xNew, f, x, g, d, H, working);
-                %                 xNew = self.restrictedExact(xNew, f, x, g, d, H, working);
                 
                 % Taking step, restore x to full-sized
                 x = xNew;
@@ -332,13 +331,13 @@ classdef PnbSolver < handle
         
         function d = newtonDir(self, g, H)
             %% NewtonDir - computes a Newton descent direction
-            % Solves the equation H * d = -g, using the gradient and hessian
-            % provided as input arguments, assuming they are of reduced
-            % size. This descent direction should only be computed on the
-            % free variables.
+            % Solves the equation H * d = -g, using the gradient and
+            % hessian provided as input arguments, assuming they are of
+            % reduced size. This descent direction should only be computed
+            % on the free variables.
             
             % Different methods could be used. Using PCG for now.
-            [d, ~] = pcg(H, g, max(1e-5 * self.optTol, 1e-12));
+            [d, ~] = pcg(H, g, max(1e-5 * self.optTol, 1e-12), 1e5);
         end
         
         function xNew = restrictedArmijo(self, xNew, f, x, g, d, ~, ...

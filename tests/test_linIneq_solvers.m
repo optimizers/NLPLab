@@ -13,6 +13,7 @@ outInfo = {};
 addpath('~/Masters/nlplab');
 addpath('~/Masters/logging4matlab/');
 addpath('~/Masters/Spot');
+addpath('~/Masters/Krylov.m/');
 
 %% Building the model
 % Quadratic objective function, linear inequalities
@@ -34,38 +35,60 @@ quadModel = LinIneqProjQpModel(Q, c, A, cL, cU, bL, bU, x0, '');
 %% MATLAB's quadprog is the reference solution
 xRef = quadprog(Q, c, [A; -A], [cU; -cL]);
 
-%% Solve using SPG (works only if prob is quadratic)
-import solvers.SpgSolver;
-solver = SpgSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
-    'progTol', 1e-15, 'maxIter', 1e4, 'verbose', 2);
-solver = solver.solve();
-
-nrmSol = norm(xRef - solver.x);
-outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
-    solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
-    solver.solveTime);
-
-%% Solve using PQN
-import solvers.PqnSolver;
-solver = PqnSolver(quadModel, 'hess', 'exact', 'aOptTol', 1e-10, ...
-    'progTol', 1e-15, 'aFeasTol', 1e-15, 'maxIter', 1e4, 'verbose', 2);
-solver = solver.solve();
-
-nrmSol = norm(xRef - solver.x);
-outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
-    solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
-    solver.solveTime);
-
-% %% Solve using Cflash
-% import solvers.CflashSolver;
-% solver = CflashSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
-%     'maxIter', 1e4, 'verbose', 2);
+% %% Solve using SPG (works only if prob is quadratic)
+% import solvers.SpgSolver;
+% solver = SpgSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
+%     'progTol', 1e-15, 'maxIter', 1e4, 'verbose', 2);
 % solver = solver.solve();
 % 
 % nrmSol = norm(xRef - solver.x);
 % outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
 %     solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
 %     solver.solveTime);
+% 
+% %% Solve using PQN
+% import solvers.PqnSolver;
+% solver = PqnSolver(quadModel, 'hess', 'exact', 'aOptTol', 1e-10, ...
+%     'progTol', 1e-15, 'aFeasTol', 1e-15, 'maxIter', 1e4, 'verbose', 2);
+% solver = solver.solve();
+% 
+% nrmSol = norm(xRef - solver.x);
+% outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
+%     solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
+%     solver.solveTime);
+
+%% Solve using TmpLiSolver
+import solvers.TmpLiSolver;
+solver = TmpLiSolver(quadModel, 'optTol', 1e-10, 'maxIter', 1e4, ...
+    'verbose', 2);
+solver = solver.solve();
+
+nrmSol = norm(xRef - solver.x);
+outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
+    solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
+    solver.solveTime);
+
+%% Solve using PnsSolver
+import solvers.PnsSolver;
+solver = PnsSolver(quadModel, 'optTol', 1e-10, 'maxIter', 1e4, ...
+    'verbose', 2);
+solver = solver.solve();
+
+nrmSol = norm(xRef - solver.x);
+outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
+    solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
+    solver.solveTime);
+
+%% Solve using Cflash
+import solvers.CflashSolver;
+solver = CflashSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
+    'maxIter', 1e4, 'verbose', 2);
+solver = solver.solve();
+
+nrmSol = norm(xRef - solver.x);
+outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
+    solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
+    solver.solveTime);
 
 %% Printing
 fprintf('\n\n\n');

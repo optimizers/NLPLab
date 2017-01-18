@@ -283,11 +283,8 @@ classdef PqnSolver < solvers.NlpSolver
                 end
                 
                 % Evaluate the Objective and Gradient at the Initial Step
-                if t == 1
-                    xNew = p;
-                else
-                    xNew = x + t * d;
-                end
+                xNew = x + t * d;
+                
                 [fNew, gNew] = self.nlp.obj(xNew);
                 
                 % Backtracking Line Search

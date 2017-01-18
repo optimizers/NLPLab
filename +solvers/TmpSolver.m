@@ -254,7 +254,7 @@ classdef TmpSolver < solvers.NlpSolver
                     case 'pcg'
                         % Double argout for pcg disables output message...
                         [d(working), ~] = pcg(H(working, working), ...
-                            -g(working), self.descDirTol);
+                            -g(working), self.descDirTol, 1e5);
                     case 'lbfgs'
                         if self.iter == 1
                             % First iteration is steepest descent
