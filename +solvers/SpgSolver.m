@@ -225,7 +225,7 @@ classdef SpgSolver < solvers.NlpSolver
                 end
                 
                 % Compute reference function for non-monotone condition
-                if self.memory == 1
+                if self.memory <= 1
                     funRef = f;
                 else
                     if self.iter == 1

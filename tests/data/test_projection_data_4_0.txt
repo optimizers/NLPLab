@@ -9,17 +9,17 @@ CONVERGENCE: 1
 ||Pg|| =  2.0e-03
 Stop tolerance =  2.2e-08
 
-EXIT TMP: Function value changing by less than aOptTol\n
-CONVERGENCE: 1
-||Pg|| =  2.3e-07
-Stop tolerance =  2.2e-08
-
 EXIT TMP: All working variables satisfy optimality condition\n
 CONVERGENCE: 1
-||Pg|| =  7.9e-12
+||Pg|| =  7.3e-14
 Stop tolerance =  2.2e-08
 
-EXIT PNB: Maximum number of iterations in line search reached\n
+EXIT TMP: Directional derivative below aOptTol\n
 CONVERGENCE: 1
-||Pg|| =  4.0e-05
+||Pg|| =  2.4e-07
+Stop tolerance =  2.2e-08
+
+EXIT PNB: All working variables satisfy optimality condition\n
+CONVERGENCE: 1
+||Pg|| =  7.3e-14
 Stop tolerance =  2.2e-08
