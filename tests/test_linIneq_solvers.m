@@ -57,20 +57,20 @@ xRef = quadprog(Q, c, [A; -A], [cU; -cL]);
 %     solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
 %     solver.solveTime);
 
-%% Solve using TmpLiSolver
-import solvers.TmpLiSolver;
-solver = TmpLiSolver(quadModel, 'optTol', 1e-10, 'maxIter', 1e4, ...
-    'verbose', 2);
-solver = solver.solve();
-
-nrmSol = norm(xRef - solver.x);
-outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
-    solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
-    solver.solveTime);
+% %% Solve using TmpLiSolver
+% import solvers.TmpLiSolver;
+% solver = TmpLiSolver(quadModel, 'optTol', 1e-10, 'maxIter', 1e4, ...
+%     'verbose', 2);
+% solver = solver.solve();
+% 
+% nrmSol = norm(xRef - solver.x);
+% outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
+%     solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
+%     solver.solveTime);
 
 %% Solve using PnsSolver
-import solvers.PnsSolver;
-solver = PnsSolver(quadModel, 'optTol', 1e-10, 'maxIter', 1e4, ...
+import solvers.PnLiSolver;
+solver = PnLiSolver(quadModel, 'optTol', 1e-10, 'maxIter', 1e4, ...
     'verbose', 2);
 solver = solver.solve();
 

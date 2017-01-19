@@ -79,8 +79,6 @@ classdef TmpSolver < solvers.NlpSolver
         method; % How to compute the descent direction
         corrections; % L-BFGS
         damped; % L-BFGS
-        
-        descDirTol; % Tolerance on computation of descent direction
         fid;
         krylOpts;
     end % private properties
@@ -133,7 +131,6 @@ classdef TmpSolver < solvers.NlpSolver
             p.addParameter('damped', 0);
             p.addParameter('fid', 1);
             p.addParameter('maxIterLS', 50); % Max iters for linesearch
-            p.addParameter('descDirTol', 1e-10);
             
             p.parse(varargin{:});
             
@@ -146,7 +143,6 @@ classdef TmpSolver < solvers.NlpSolver
             self.corrections = p.Results.corrections;
             self.damped = p.Results.damped;
             self.fid = p.Results.fid;
-            self.descDirTol = p.Results.descDirTol;
             
             if (strcmp(self.method, 'lsqr') || ...
                     strcmp(self.method, 'lsmr')) && ...
@@ -155,15 +151,11 @@ classdef TmpSolver < solvers.NlpSolver
                     ' order to use LSMR or LSQR.']);
             end
             
-            if strcmp(self.method, 'minres') || ...
-                    strcmp(self.method, 'lsqr') || ...
-                    strcmp(self.method, 'lsmr')
-                self.krylOpts.rtol = self.descDirTol;
-                self.krylOpts.etol = self.descDirTol;
-                self.krylOpts.shift = 0;
-                self.krylOpts.show = false;
-                self.krylOpts.check = false;
-            end
+            self.krylOpts.etol = self.aOptTol;
+            self.krylOpts.shift = 0;
+            self.krylOpts.show = false;
+            self.krylOpts.check = false;
+            self.krylOpts.itnlim = max(1e4, self.nlp.n);
         end % constructor
         
         function self = solve(self)
@@ -217,7 +209,8 @@ classdef TmpSolver < solvers.NlpSolver
             end
             
             self.rOptTol = self.aOptTol * norm(g);
-            
+            self.krylOpts.rtol = self.rOptTol;
+                        
             % Compute working set (inactive constraints)
             working = self.working(x, g);
             
@@ -239,7 +232,7 @@ classdef TmpSolver < solvers.NlpSolver
                     case 'newton'
                         [d, H] = self.newtonDescDir(d, g, H, working);
                     case 'lsqr'
-                       d(working) = lsqr_spot( ...
+                        d(working) = lsqr_spot( ...
                             self.nlp.A(:, working), ...
                             self.nlp.b, self.krylOpts) ...
                             - x(working);
@@ -254,7 +247,8 @@ classdef TmpSolver < solvers.NlpSolver
                     case 'pcg'
                         % Double argout for pcg disables output message...
                         [d(working), ~] = pcg(H(working, working), ...
-                            -g(working), self.descDirTol, 1e5);
+                            -g(working), self.rOptTol + self.aOptTol, ...
+                            self.krylOpts.itnlim);
                     case 'lbfgs'
                         if self.iter == 1
                             % First iteration is steepest descent

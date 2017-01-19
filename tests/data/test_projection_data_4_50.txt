@@ -9,17 +9,17 @@ CONVERGENCE: 1
 ||Pg|| =  1.8e-03
 Stop tolerance =  2.0e-08
 
-EXIT TMP: Function value changing by less than aOptTol\n
+EXIT TMP: All working variables satisfy optimality condition\n
 CONVERGENCE: 1
-||Pg|| =  3.7e-05
+||Pg|| =  4.8e-09
 Stop tolerance =  2.0e-08
 
 EXIT TMP: All working variables satisfy optimality condition\n
 CONVERGENCE: 1
-||Pg|| =  1.1e-09
+||Pg|| =  5.6e-11
 Stop tolerance =  2.0e-08
 
-EXIT PNB: Function value changing by less than funcTol\n
+EXIT PNB: All working variables satisfy optimality condition\n
 CONVERGENCE: 1
-||Pg|| =  4.3e-06
+||Pg|| =  4.7e-09
 Stop tolerance =  2.0e-08

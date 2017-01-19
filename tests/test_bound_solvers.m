@@ -30,9 +30,6 @@ cL = -inf(n, 1);
 cU = inf(n, 1);
 A = [];
 
-import model.BoundProjQpModel;
-quadModel = BoundProjQpModel(Q, c, A, cL, cU, bL, bU, x0, '');
-
 %% MATLAB's quadprog is the reference solution
 xRef = quadprog(Q, c, [], [], [], [], bL, bU);
 
@@ -65,27 +62,58 @@ xRef = quadprog(Q, c, [], [], [], [], bL, bU);
 %     solver.iter, solver.nObjFunc, solver.nGrad, solver.nHess, ...
 %     solver.pgNorm, nrmSol, solver.solveTime);
 
-%% Solve using Pnb
-import solvers.PnbSolver;
-solver = PnbSolver(quadModel, 'optTol', 1e-10, 'maxIter', 1e4, ...
-    'verbose', 1, 'exactLS', true);
-solver = solver.solve();
-
-nrmSol = norm(xRef - solver.x);
-outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
-    solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
-    solver.solveTime);
-
-% %% Solve using SPG (works only if prob is quadratic)
-% import solvers.SpgSolver;
-% solver = SpgSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
-%      'maxIter', 1e4, 'verbose', 1);
+% %% Solve using Pnb
+% import model.BoundProjQpModel;
+% quadModel = BoundProjQpModel(Q, c, A, cL, cU, bL, bU, x0, '');
+% import solvers.PnbSolver;
+% solver = PnbSolver(quadModel, 'optTol', 1e-10, 'maxIter', 1e4, ...
+%     'verbose', 2, 'exactLS', false);
 % solver = solver.solve();
 % 
 % nrmSol = norm(xRef - solver.x);
 % outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
 %     solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
 %     solver.solveTime);
+% 
+% %% Solve using Pn
+% import model.BoundProjQpModel;
+% quadModel = BoundProjQpModel(Q, c, A, cL, cU, bL, bU, x0, '');
+% import solvers.PnSolver;
+% solver = PnSolver(quadModel, 'optTol', 1e-10, 'maxIter', 1e4, ...
+%     'verbose', 2);
+% solver = solver.solve();
+% 
+% nrmSol = norm(xRef - solver.x);
+% outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
+%     solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
+%     solver.solveTime);
+
+%% Solve using Bb
+import model.BoundProjQpModel;
+quadModel = BoundProjQpModel(Q, c, A, cL, cU, bL, bU, x0, '');
+import solvers.BbSolver;
+solver = BbSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
+     'maxIter', 1e4, 'verbose', 1);
+solver = solver.solve();
+
+nrmSol = norm(xRef - solver.x);
+outInfo{end + 1} = sprintf(BODY_FORMAT, [class(solver), 'bb+projLS'], ...
+    solver.iter, ...
+    solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
+    solver.solveTime);
+
+%% Solve using SPG (works only if prob is quadratic)
+import model.BoundProjQpModel;
+quadModel = BoundProjQpModel(Q, c, A, cL, cU, bL, bU, x0, '');
+import solvers.SpgSolver;
+solver = SpgSolver(quadModel, 'aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
+     'maxIter', 1e4, 'verbose', 1);
+solver = solver.solve();
+
+nrmSol = norm(xRef - solver.x);
+outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), solver.iter, ...
+    solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, nrmSol, ...
+    solver.solveTime);
 % 
 % %% Solve using PQN
 % import solvers.PqnSolver;

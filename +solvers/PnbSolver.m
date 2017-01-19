@@ -41,7 +41,6 @@ classdef PnbSolver < handle
         suffDec; % Sufficient decrease coefficient in line search
         maxIterLS; % Maximal number of iterations in the line search
         fid;
-        
         lsFunc; % Line search function
     end
     
@@ -112,7 +111,7 @@ classdef PnbSolver < handle
         function self = solve(self)
             %% Solve using the Projected Newton for bounds algorithm
             self.solveTime = tic;
-            self.iter = 0;
+            self.iter = 1;
             self.iStop = 0;
             
             % Output Log
@@ -337,7 +336,8 @@ classdef PnbSolver < handle
             % on the free variables.
             
             % Different methods could be used. Using PCG for now.
-            [d, ~] = pcg(H, g, max(1e-5 * self.optTol, 1e-12), 1e5);
+            [d, ~] = pcg(H, g, self.optTol + self.stopTol, ...
+                max(1e4, self.nlp.n));
         end
         
         function xNew = restrictedArmijo(self, xNew, f, x, g, d, ~, ...
