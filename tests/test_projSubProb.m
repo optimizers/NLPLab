@@ -53,7 +53,7 @@ MAX_ITER = 1e5;
 import model.ProjModel;
 
 import solvers.TmpSolver;
-mcOpts.verbose = 1;
+mcOpts.verbose = 2;
 mcOpts.aOptTol = TOL;
 mcOpts.maxIter = MAX_ITER;
 mcOpts.maxEval = 1e5;
@@ -64,10 +64,27 @@ mcOpts.damped = 0;
 
 import solvers.PnbSolver;
 pnbOpts.optTol = TOL;
-pnbOpts.maxIter =  MAX_ITER;
-pnbOpts.verbose = 1;
+pnbOpts.maxIter = MAX_ITER;
+pnbOpts.verbose = 2;
 pnbOpts.exactLS = false;
 
+import solvers.BbSolver;
+bbOpts.aOptTol = TOL;
+bbOpts.maxIter = MAX_ITER;
+bbOpts.maxEval = 1e5;
+
+import solvers.SpgSolver;
+spgOpts.aOptTol = TOL;
+spgOpts.maxIter = MAX_ITER;
+spgOpts.maxEval = 1e5;
+
+import solvers.PqnSolver;
+pqnOpts.aOptTol = TOL;
+pqnOpts.maxIter = MAX_ITER;
+pqnOpts.maxEval = 1e5;
+pqnOpts.hess = 'exact';
+
+data = struct;
 
 for r = [75, 50, 25, 0]
     fprintf('\n---------------------- r = %d ----------------------\n', ...
@@ -83,20 +100,29 @@ for r = [75, 50, 25, 0]
     diary(['data/test_projection_data_', num2str(FACTOR), '_', ...
         num2str(RANGE), '.txt']);
     
+    %% TMP
     % LSQR (Spot)
     projModel.setPointToProject(x0);
     mcOpts.method = 'lsqr';
     solver = TmpSolver(projModel, mcOpts);
     solver.solve();
     
-    outInfo{end + 1} = sprintf(BODY_FORMAT, [class(solver), ' ', ...
-        mcOpts.method], RANGE, solver.iter, solver.nObjFunc, ...
-        solver.nGrad, solver.nHess, solver.pgNorm, solver.solveTime);
-    outLatex{end + 1} = sprintf(BODY_LATEX, [class(solver), ' ', ...
-        mcOpts.method], ' & ', RANGE, ' & ', solver.iter, ' & ', ...
-        solver.nObjFunc, ' & ', solver.nGrad, ' & ', ...
-        solver.nHess, ' & ', solver.pgNorm, ' & ', ...
-        solver.solveTime, ' \\ ');
+    name = class(solver);
+    name = name(strfind(name, '.') + 1 : end);
+    name = [name, mcOpts.method];
+    [info, latex] = printInfo(BODY_FORMAT, BODY_LATEX, name, RANGE, ...
+        solver);
+    
+    outInfo{end + 1} = info;
+    outLatex{end + 1} = latex;
+    if RANGE == 75
+        data.(name) = [RANGE, solver.iter, solver.nObjFunc, ...
+            solver.nGrad, solver.nHess, solver.pgNorm, solver.solveTime];
+    else
+        data.(name) = [data.(name); [RANGE, solver.iter, ...
+            solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, ...
+            solver.solveTime]];
+    end
     
     % LSQR (Spot)
     projModel = ProjModel(prec, crit.J{2}.GeoS);
@@ -105,14 +131,23 @@ for r = [75, 50, 25, 0]
     solver = TmpSolver(projModel, mcOpts);
     solver.solve();
     
-    outInfo{end + 1} = sprintf(BODY_FORMAT, [class(solver), ' ', ...
-        mcOpts.method], RANGE, solver.iter, solver.nObjFunc, ...
-        solver.nGrad, solver.nHess, solver.pgNorm, solver.solveTime);
-    outLatex{end + 1} = sprintf(BODY_LATEX, [class(solver), ' ', ...
-        mcOpts.method], ' & ', RANGE, ' & ', solver.iter, ' & ', ...
-        solver.nObjFunc, ' & ', solver.nGrad, ' & ', ...
-        solver.nHess, ' & ', solver.pgNorm, ' & ', ...
-        solver.solveTime, ' \\ ');
+    name = class(solver);
+    name = name(strfind(name, '.') + 1 : end);
+    name = [name, mcOpts.method];
+    [info, latex] = printInfo(BODY_FORMAT, BODY_LATEX, name, RANGE, ...
+        solver);
+    
+    outInfo{end + 1} = info;
+    outLatex{end + 1} = latex;
+    
+    if RANGE == 75
+        data.(name) = [RANGE, solver.iter, solver.nObjFunc, ...
+            solver.nGrad, solver.nHess, solver.pgNorm, solver.solveTime];
+    else
+        data.(name) = [data.(name); [RANGE, solver.iter, ...
+            solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, ...
+            solver.solveTime]];
+    end
     
     % PCG
     projModel = ProjModel(prec, crit.J{2}.GeoS);
@@ -121,14 +156,23 @@ for r = [75, 50, 25, 0]
     solver = TmpSolver(projModel, mcOpts);
     solver.solve();
     
-    outInfo{end + 1} = sprintf(BODY_FORMAT, [class(solver), ' ', ...
-        mcOpts.method], RANGE, solver.iter, solver.nObjFunc, ...
-        solver.nGrad, solver.nHess, solver.pgNorm, solver.solveTime);
-    outLatex{end + 1} = sprintf(BODY_LATEX, [class(solver), ' ', ...
-        mcOpts.method], ' & ', RANGE, ' & ', solver.iter, ' & ', ...
-        solver.nObjFunc, ' & ', solver.nGrad, ' & ', ...
-        solver.nHess, ' & ', solver.pgNorm, ' & ', ...
-        solver.solveTime, ' \\ ');
+    name = class(solver);
+    name = name(strfind(name, '.') + 1 : end);
+    name = [name, mcOpts.method];
+    [info, latex] = printInfo(BODY_FORMAT, BODY_LATEX, name, RANGE, ...
+        solver);
+    
+    outInfo{end + 1} = info;
+    outLatex{end + 1} = latex;
+    
+    if RANGE == 75
+        data.(name) = [RANGE, solver.iter, solver.nObjFunc, ...
+            solver.nGrad, solver.nHess, solver.pgNorm, solver.solveTime];
+    else
+        data.(name) = [data.(name); [RANGE, solver.iter, ...
+            solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, ...
+            solver.solveTime]];
+    end
     
     % MINRES (Spot)
     projModel = ProjModel(prec, crit.J{2}.GeoS);
@@ -137,28 +181,117 @@ for r = [75, 50, 25, 0]
     solver = TmpSolver(projModel, mcOpts);
     solver.solve();
     
-    outInfo{end + 1} = sprintf(BODY_FORMAT, [class(solver), ' ', ...
-        mcOpts.method], RANGE, solver.iter, solver.nObjFunc, ...
-        solver.nGrad, solver.nHess, solver.pgNorm, solver.solveTime);
-    outLatex{end + 1} = sprintf(BODY_LATEX, [class(solver), ' ', ...
-        mcOpts.method], ' & ', RANGE, ' & ', solver.iter, ' & ', ...
-        solver.nObjFunc, ' & ', solver.nGrad, ' & ', ...
-        solver.nHess, ' & ', solver.pgNorm, ' & ', ...
-        solver.solveTime, ' \\ ');
+    name = class(solver);
+    name = name(strfind(name, '.') + 1 : end);
+    name = [name, mcOpts.method];
+    [info, latex] = printInfo(BODY_FORMAT, BODY_LATEX, name, RANGE, ...
+        solver);
     
-    % Pnb
+    outInfo{end + 1} = info;
+    outLatex{end + 1} = latex;
+    
+    if RANGE == 75
+        data.(name) = [RANGE, solver.iter, solver.nObjFunc, ...
+            solver.nGrad, solver.nHess, solver.pgNorm, solver.solveTime];
+    else
+        data.(name) = [data.(name); [RANGE, solver.iter, ...
+            solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, ...
+            solver.solveTime]];
+    end
+    
+    %% Pnb
     projModel = ProjModel(prec, crit.J{2}.GeoS);
     projModel.setPointToProject(x0);
     solver = PnbSolver(projModel, pnbOpts);
     solver.solve();
     
-    outInfo{end + 1} = sprintf(BODY_FORMAT, class(solver), RANGE, ...
-        solver.iter, solver.nObjFunc, solver.nGrad, solver.nHess, ...
-        solver.pgNorm, solver.solveTime);
-    outLatex{end + 1} = sprintf(BODY_LATEX, class(solver), ' & ', ...
-        RANGE, ' & ', solver.iter, ' & ', solver.nObjFunc, ' & ', ...
-        solver.nGrad, ' & ', solver.nHess, ' & ', solver.pgNorm, ' & ', ...
-        solver.solveTime, ' ');
+    name = class(solver);
+    name = name(strfind(name, '.') + 1 : end);
+    [info, latex] = printInfo(BODY_FORMAT, BODY_LATEX, name, RANGE, ...
+        solver);
+    
+    outInfo{end + 1} = info;
+    outLatex{end + 1} = latex;
+    
+    if RANGE == 75
+        data.(name) = [RANGE, solver.iter, solver.nObjFunc, ...
+            solver.nGrad, solver.nHess, solver.pgNorm, solver.solveTime];
+    else
+        data.(name) = [data.(name); [RANGE, solver.iter, ...
+            solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, ...
+            solver.solveTime]];
+    end
+    
+    %% Bb
+    projModel = ProjModel(prec, crit.J{2}.GeoS);
+    projModel.setPointToProject(x0);
+    solver = BbSolver(projModel, bbOpts);
+    solver.solve();
+    
+    name = class(solver);
+    name = name(strfind(name, '.') + 1 : end);
+    [info, latex] = printInfo(BODY_FORMAT, BODY_LATEX, name, RANGE, ...
+        solver);
+    
+    outInfo{end + 1} = info;
+    outLatex{end + 1} = latex;
+    
+    if RANGE == 75
+        data.(name) = [RANGE, solver.iter, solver.nObjFunc, ...
+            solver.nGrad, solver.nHess, solver.pgNorm, solver.solveTime];
+    else
+        data.(name) = [data.(name); [RANGE, solver.iter, ...
+            solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, ...
+            solver.solveTime]];
+    end
+    
+    %% Spg
+    projModel = ProjModel(prec, crit.J{2}.GeoS);
+    projModel.setPointToProject(x0);
+    solver = SpgSolver(projModel, spgOpts);
+    solver.solve();
+    
+    name = class(solver);
+    name = name(strfind(name, '.') + 1 : end);
+    [info, latex] = printInfo(BODY_FORMAT, BODY_LATEX, name, RANGE, ...
+        solver);
+    
+    outInfo{end + 1} = info;
+    outLatex{end + 1} = latex;
+    
+    if RANGE == 75
+        data.(name) = [RANGE, solver.iter, solver.nObjFunc, ...
+            solver.nGrad, solver.nHess, solver.pgNorm, solver.solveTime];
+    else
+        data.(name) = [data.(name); [RANGE, solver.iter, ...
+            solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, ...
+            solver.solveTime]];
+    end
+    
+    %% Pqn
+    projModel = ProjModel(prec, crit.J{2}.GeoS);
+    projModel.setPointToProject(x0);
+    solver = PqnSolver(projModel, pqnOpts);
+    solver.solve();
+    
+    name = class(solver);
+    name = name(strfind(name, '.') + 1 : end);
+    [info, latex] = printInfo(BODY_FORMAT, BODY_LATEX, name, RANGE, ...
+        solver);
+    
+    outInfo{end + 1} = info;
+    outLatex{end + 1} = latex;
+    
+    if RANGE == 75
+        data.(name) = [RANGE, solver.iter, solver.nObjFunc, ...
+            solver.nGrad, solver.nHess, solver.pgNorm, solver.solveTime];
+    else
+        data.(name) = [data.(name); [RANGE, solver.iter, ...
+            solver.nObjFunc, solver.nGrad, solver.nHess, solver.pgNorm, ...
+            solver.solveTime]];
+    end
+    
+    %% Switch logging off
     diary('off');
 end
 
@@ -174,3 +307,6 @@ for s = outLatex
     fprintf(fid, s{1});
 end
 fclose(fid);
+
+%% Plot struct data
+plotStructData(data, HEADER(2:end));

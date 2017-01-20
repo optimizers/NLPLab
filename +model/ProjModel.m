@@ -121,7 +121,6 @@ classdef ProjModel < model.LeastSquaresModel
             % however the original format is maintained to stay consistant
             % throughout the code
             H = real(self.prec.AdjointDirect(v));
-            
         end
         
         

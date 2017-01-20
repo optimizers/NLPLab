@@ -121,7 +121,7 @@ classdef SpgSolver < solvers.NlpSolver
             p.addParameter('testOpt', 1);
             p.addParameter('bbType', 0);
             p.addParameter('fid', 1);
-            p.addParameter('maxIterLS', 30); % Max iters for linesearch
+            p.addParameter('maxIterLS', 50); % Max iters for linesearch
             
             p.parse(varargin{:});
             
