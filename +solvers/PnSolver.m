@@ -1,6 +1,5 @@
-
-classdef TmpLiSolver < handle
-    %% TmpLiSolver - Projected Newton optimization algorithm on custom set
+classdef PnSolver < handle
+    %% PnSolver - Projected Newton optimization algorithm on custom set
     
     
     properties (Access = public)
@@ -30,6 +29,7 @@ classdef TmpLiSolver < handle
         % optTol relative to the initial gradient norm
         stopTol;
         relFuncTol;
+        memory = 10;
     end
     
     properties (Access = private, Hidden = false)
@@ -47,34 +47,29 @@ classdef TmpLiSolver < handle
     end
     
     properties (Hidden = true, Constant)
-        LOG_HEADER = {'Iteration', 'FunEvals', 'fObj', '||Pg||', ...
-            'nWorking'};
-        LOG_FORMAT = '%10s %10s %15s %15s %10s\n';
-        LOG_BODY = '%10d %10d %15.5e %15.5e %10d\n';
+        LOG_HEADER = {'Iteration', 'FunEvals', 'fObj', '||Pg||'};
+        LOG_FORMAT = '%10s %10s %15s %15s \n';
+        LOG_BODY = '%10d %10d %15.5e %15.5e\n';
         EXIT_MSG = { ...
-            ['All variables are at their bound and no further', ...
-            ' progress is possible\n'], ...                             % 1
-            'All working variables satisfy optimality condition\n', ... % 2
-            'Function value changing by less than funcTol\n', ...       % 3
-            'Function Evaluations exceeds maxEval\n', ...               % 4
-            'Maximum number of iterations reached\n', ...               % 5
-            'Maximum number of iterations in line search reached\n', ...% 6
+            'All working variables satisfy optimality condition\n', ... % 1
+            'Function value changing by less than funcTol\n', ...       % 2
+            'Function Evaluations exceeds maxEval\n', ...               % 3
+            'Maximum number of iterations reached\n', ...               % 4
+            'Maximum number of iterations in line search reached\n', ...% 5
+            'Projected CG exit without convergence\n', ...              % 6
             };
+        CG_TOL = 0.1;
     end % constant properties
     
     
     methods (Access = public)
         
-        function self = TmpLiSolver(nlp, varargin)
+        function self = PnSolver(nlp, varargin)
             %% Constructor
             if ~isa(nlp, 'model.NlpModel')
                 error('Model must be a NlpModel');
             elseif ~ismethod(nlp, 'project')
                 error('nlp doesn''t contain a project method');
-            elseif ~ismethod(nlp, 'eqProject')
-                error('nlp doesn''t contain an eqProject method');
-            elseif ~isprop(nlp, 'normJac') && ~ismethod(nlp, 'normJac')
-                error('nlp doesn''t contain a normJac attribute');
             end
             self.nlp = nlp;
             
@@ -84,7 +79,6 @@ classdef TmpLiSolver < handle
             p.PartialMatching = false;
             p.addParameter('verbose', 2);
             p.addParameter('optTol', 1e-5);
-            p.addParameter('eqTol', 1e-10);
             p.addParameter('maxIter', 5e2);
             p.addParameter('maxEval', 5e2);
             p.addParameter('suffDec', 1e-4);
@@ -96,14 +90,12 @@ classdef TmpLiSolver < handle
             p.parse(varargin{:});
             self.verbose = p.Results.verbose;
             self.optTol = p.Results.optTol;
-            self.eqTol = p.Results.eqTol;
             self.maxIter = p.Results.maxIter;
             self.maxEval = p.Results.maxEval;
             self.suffDec = p.Results.suffDec;
             self.maxIterLS = p.Results.maxIterLS;
             self.funcTol = p.Results.funcTol;
             self.fid = p.Results.fid;
-            
         end % constructor
         
         function self = solve(self)
@@ -133,9 +125,6 @@ classdef TmpLiSolver < handle
             %% Main loop
             while self.iStop == 0
                 
-                % Get working set of variables
-                fixed = self.getFixedSet(x, -g);
-                
                 % Stopping criteria is the norm of the 'working' gradient
                 pgnrm = norm(self.nlp.project(x - g) - x);
                 
@@ -144,33 +133,32 @@ classdef TmpLiSolver < handle
                     self.nlp.ncalls_fcon;
                 if self.verbose >= 2
                     fprintf(self.LOG_BODY, self.iter, self.nObjFunc, f, ...
-                        pgnrm, sum(~fixed));
+                        pgnrm);
                 end
                 
                 % Checking various stopping conditions, exit if true
-                if ~any(~fixed) % all(fixed)
+                if pgnrm < self.stopTol + self.optTol
                     self.iStop = 1;
-                elseif pgnrm < self.stopTol + self.optTol
-                    self.iStop = 2;
                 elseif abs(f - fOld) < self.relFuncTol + self.funcTol
-                    self.iStop = 3;
+                    self.iStop = 2;
                 elseif self.nObjFunc >= self.maxEval
-                    self.iStop = 4;
+                    self.iStop = 3;
                 elseif self.iter >= self.maxIter
-                    self.iStop = 5;
+                    self.iStop = 4;
                 end
                 
                 if self.iStop ~= 0
                     break
                 end
                 
-                %                 % Compute Newton direction, H*d = -g
-                %                 d2 = self.newtonDir(g, H);
-                %                 % Project on C(fixed, :) * d = 0
-                %                 d2 = self.nlp.eqProject(d2, fixed);
+                % Compute descent direction
+                [p, info] = self.projCg(-H*x + g, H, norm(g));
+                if info ~= 1
+                    self.iStop = 6;
+                    break;
+                end
+                d = p - x;
                 
-                d = self.nlp.minEqProject(g, H, fixed);
-
                 % Compute Armijo line search
                 x = self.armijo(x, f, g, d);
                 
@@ -196,7 +184,7 @@ classdef TmpLiSolver < handle
             self.solved = ~(self.iStop == 8 || self.iStop == 9);
             
             if self.verbose
-                self.printf('\nEXIT TMPLI: %s\nCONVERGENCE: %d\n', ...
+                self.printf('\nEXIT PN: %s\nCONVERGENCE: %d\n', ...
                     self.EXIT_MSG{self.iStop}, self.solved);
                 self.printf('||Pg|| = %8.1e\n', self.pgNorm);
                 self.printf('Stop tolerance = %8.1e\n', self.stopTol);
@@ -218,7 +206,7 @@ classdef TmpLiSolver < handle
                     % Print header
                     self.printf('\n');
                     self.printf('%s\n', ['*', repmat('-',1,58), '*']);
-                    self.printf([repmat('\t', 1, 3), 'TmpLi Solver \n']);
+                    self.printf([repmat('\t', 1, 3), 'Pn Solver \n']);
                     self.printf('%s\n\n', ['*', repmat('-',1,58), '*']);
                     self.printf(self.nlp.formatting())
                     self.printf('\nParameters\n----------\n')
@@ -269,35 +257,66 @@ classdef TmpLiSolver < handle
             fprintf(self.fid, varargin{:});
         end
         
-        function fixed = getFixedSet(self, x, d)
-            %% GetFixedSet - Finds the fixed set for proj. Newton step
-            % Inputs:
-            %   - x: current point
-            %   - d: descent direction
-            % Outputs:
-            %   - fixed: bool array of fixed variables
+        function [w, info] = projCg(self, g, H, gNrm)
+            %% ProjCg
+            %       min_w   q(w) := 0.5*(w - x)'*H*(w - x) + g'*(w - x)
+            %       st      w \in X
+            %
+            % On exit info is set as follows:
+            %
+            %       info = 1  Convergence in the original variables.
+            %       info = 2  Negative curvature direction generated.
+            %       info = 3  Failure to converge within iterMax iterations
             
-            Cx = self.nlp.fcon(x); % C*x
-            Cd = self.nlp.fcon(d); % C*d
+            % Initialize the iterate w and the residual r.
+            w = zeros(self.nlp.n, 1);
+            % Initialize the residual r of grad q to -g.
+            r = -g;
+            % Initialize the direction p.
+            p = r;
+            % Initialize rho and the norms of r.
+            rho = r'*r;
             
-            % Smallest approximation is eps
-            appZero = max(self.eqTol * self.nlp.normJac * norm(x), eps);
+            rTol = gNrm * self.CG_TOL;
             
-            % Find gradient fixed set
-            fixed = (Cx - self.nlp.cL < appZero & Cd < 0) | ...
-                (self.nlp.cU - Cx < appZero & Cd > 0);
-        end
-        
-        function d = newtonDir(self, g, H)
-            %% NewtonDir - computes a Newton descent direction
-            % Solves the equation H * d = -g, using the gradient and
-            % hessian provided as input arguments, assuming they are of
-            % reduced size. This descent direction should only be computed
-            % on the free variables.
+            % Exit if g = 0.
+            if sqrt(rho) == 0
+                info = 1;
+                return
+            end
             
-            % Different methods could be used. Using PCG for now.
-            [d, ~] = pcg(H, -g, max(1e-5 * self.optTol, 1e-12), 1e5);
-        end
+            iterMax = max(1e4, self.nlp.n);
+            for iters = 1:iterMax
+                % Project on the constraint set
+                p = self.nlp.project(p);
+                % Compute alph
+                q = H * p;
+                ptq = p'*q;
+                if ptq > 0
+                    % Positive curvature, continue
+                    alph = rho/ptq;
+                else
+                    % Negative curvature
+                    info = 2;
+                    return
+                end
+                % Update w and the residuals r.
+                w = w + alph*p;
+                r = r - alph*q;
+                % Exit if the residual convergence test is satisfied.
+                rtr = r'*r;
+                rnorm = sqrt(rtr);
+                if rnorm <=  rTol
+                    info = 1;
+                    return
+                end
+                % Compute p = r + betaFactor*p and update rho.
+                betaFactor = rtr/rho;
+                p = r + betaFactor * p;
+                rho = rtr;
+            end % for loop
+            info = 3;
+        end % projcg
         
         function xNew = armijo(self, x, f, g, d)
             %% Armijo - Armijo line search
@@ -310,7 +329,7 @@ classdef TmpLiSolver < handle
             t = 1;
             while true
                 % Recompute trial step on free variables
-                xNew = self.nlp.project(x + t * d);
+                xNew = x + t * d;
                 % Update objective function value
                 fNew = self.nlp.obj(xNew);
                 % Checking exit conditions
@@ -319,42 +338,14 @@ classdef TmpLiSolver < handle
                     return;
                 elseif iterLS >= self.maxIterLS
                     % Maximal number of iterations reached, abort
-                    self.iStop = 6;
-                    return;
+                    self.iStop = 5;
+                    break;
                 end
                 % Decrease step size
                 t = t / 2;
                 iterLS = iterLS + 1;
             end
         end
-        
-        function x = backtracking(self, x, f, g, d)
-            %% Backtracking Line Search
-            % Applies an interpolation procedure (half step) if the new
-            % value doesn't improve the value of the objective function.
-            
-            iterLS = 1;
-            t = 1;
-            % Check if decrease is sufficient
-            while true
-                
-                % Evaluate new point
-                xNew = self.nlp.project(x + t * d);
-                % Evaluate objective function at new point
-                fNew = self.nlp.obj(xNew);
-                
-                if fNew <= f + self.suffDec * g' * (xNew - x)
-                    return;
-                elseif iterLS >= self.maxIterLS
-                    % Maximal number of iterations reached, abort
-                    self.iStop = 6;
-                    return;
-                end
-                
-                t = 0.5 * t;
-                iterLS = iterLS + 1;
-            end
-        end % backtracking
         
     end
     
