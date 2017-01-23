@@ -83,10 +83,10 @@ classdef PqnSolver < solvers.NlpSolver
             'First-Order Optimality Conditions Below aOptTol\n', ...    % 3
             'Step size below progTol\n', ...                            % 4
             'Function value changing by less than progTol\n', ...       % 5
-            'Two consecutive linesearches have failed\n', ...           % 6
-            'Function Evaluations exceeds maxIter\n', ...               % 7
-            'Number of projections exceeds maxProject\n', ...           % 8
-            'Maximal number of iterations reached\n', ...               % 9
+            'Function Evaluations exceeds maxIter\n', ...               % 6
+            'Number of projections exceeds maxProject\n', ...           % 7
+            'Maximal number of iterations reached\n', ...               % 8
+            'Maximal number of line search iterations reached\n', ...   % 9
             };
         LOG_HEADER = {'Iteration', 'Inner Iter', 'FunEvals', ...
             'Projections', 'Step Length', 'Function Val', 'Opt Cond', ...
@@ -181,10 +181,6 @@ classdef PqnSolver < solvers.NlpSolver
             self.nProj = 0;
             self.iter = 1;
             self.spgIter = 0;
-            % Boolean for linesearch failure, a first failure will cause
-            % the procedure to reset, whereas two consecutive failures will
-            % cause the program to exit.
-            failed = false;
             
             % Exit flag set to 0, will exit if not 0
             self.iStop = 0;
@@ -197,6 +193,7 @@ classdef PqnSolver < solvers.NlpSolver
             else
                 [f, g] = self.nlp.obj(x);
             end
+            fOld = -inf;
             
             self.rOptTol = self.aOptTol * norm(g);
             self.rFeasTol = self.aFeasTol * norm(f);
@@ -209,8 +206,7 @@ classdef PqnSolver < solvers.NlpSolver
             %% Main loop
             while self.iStop == 0
                 % Compute Step Direction
-                if self.iter == 1 || failed
-                    % Reset if linesearch has failed
+                if self.iter == 1
                     p = self.project(x - g);
                     S = zeros(self.nlp.n, 0);
                     Y = zeros(self.nlp.n, 0);
@@ -239,7 +235,6 @@ classdef PqnSolver < solvers.NlpSolver
                         otherwise
                             error('Unrecognized method');
                     end
-                    
                     xSubInit = x;
                     if self.bbInit
                         % Use Barzilai-Borwein step to init the sub-problem
@@ -250,12 +245,12 @@ classdef PqnSolver < solvers.NlpSolver
                         % Solve Sub-problem
                         xSubInit = x - alph * g;
                     end
-                    
                     % Solve Sub-problem, call MinConf_SPG
                     p = self.solveSubProblem(x, g, HvFunc, xSubInit);
                 end
-                
+                % Descent direction
                 d = p - x;
+                % Save for L-BFGS updates
                 gOld = g;
                 xOld = x;
                 
@@ -270,37 +265,12 @@ classdef PqnSolver < solvers.NlpSolver
                     break;
                 end
                 
-                % Select Initial Guess to step length
-                if self.iter == 1 || self.adjustStep == 0 || failed
-                    t = 1;
-                else
-                    t = min(1, 2 * (f - fOld) / gtd);
-                end
-                
-                % Bound Step length on first iteration
-                if self.iter == 1
-                    t = min(1, 1 / sum(abs(g)));
-                end
-                
-                % Evaluate the Objective and Gradient at the Initial Step
-                xNew = x + t * d;
-                
-                [fNew, gNew] = self.nlp.obj(xNew);
-                
                 % Backtracking Line Search
+                [x, fNew, g, t] = self.backtracking(x, f, g, d, fOld, gtd);
                 fOld = f;
-                oldFailed = failed;
-                [xNew, fNew, gNew, t, failed] = self.backtracking(x, ...
-                    xNew, f, fNew, g, gNew, d, t);
-                
-                % Take Step
-                x = xNew;
                 f = fNew;
-                g = gNew;
                 
-                if strcmp(self.hess, 'exact') && ~failed
-                    % If the linesearch computed a new point, re-evaluate
-                    % the hessian (not done in backtracking)
+                if strcmp(self.hess, 'exact')
                     [~, ~, H] = self.nlp.obj(x);
                 end
                 
@@ -320,20 +290,16 @@ classdef PqnSolver < solvers.NlpSolver
                 if pgnrm < self.rOptTol + self.aOptTol
                     self.iStop = 3;
                 elseif max(abs(t * d)) < self.progTol * norm(d) + ...
-                        self.progTol && ~failed
+                        self.progTol
                     self.iStop = 4;
-                elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol ...
-                        && ~failed
+                elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
                     self.iStop = 5;
-                elseif failed && oldFailed
-                    % Two consecutive linesearches have failed, exit
-                    self.iStop = 6;
                 elseif self.nObjFunc > self.maxEval
-                    self.iStop = 7;
+                    self.iStop = 6;
                 elseif self.nProj > self.maxProj
-                    self.iStop = 8;
+                    self.iStop = 7;
                 elseif self.iter >= self.maxIter
-                    self.iStop = 9;
+                    self.iStop = 8;
                 end
                 if self.iStop ~= 0
                     break;
@@ -519,35 +485,43 @@ classdef PqnSolver < solvers.NlpSolver
             p = subProblem.x;
         end % solveSubProblem
         
-        function [xNew, fNew, gNew, t, failed] = backtracking(self, ...
-                x, xNew, f, fNew, g, gNew, d, t)
+        function [xNew, fNew, gNew, t] = backtracking(self, x, f, g, d, ...
+                fOld, gtd)
             
-            failed = false;
+            % Select Initial Guess to step length
+            if self.iter == 1 || self.adjustStep == 0
+                t = 1;
+            else
+                t = min(1, 2 * (f - fOld) / gtd);
+            end
+            % Bound Step length on first iteration
+            if self.iter == 1
+                t = min(1, 1 / sum(abs(g)));
+            end
+            
             iterLS = 1;
-            while fNew > f + self.suffDec * g' * (xNew - x)
+            while true
                 
+                % Evaluate the Objective and Gradient at the Initial Step
+                xNew = x + t * d;
+                [fNew, gNew] = self.nlp.obj(xNew);
+                
+                if fNew <= f + self.suffDec * g' * (xNew - x)
+                    % Armijo condition met
+                    return
+                    % Check whether step has become too small
+                elseif sum(abs(t * d)) < self.progTol * norm(d) || ...
+                        t == 0 || iterLS >= self.maxIterLS
+                    if self.verbose == 2
+                        fprintf('Line Search failed\n');
+                    end
+                    self.iStop = 9;
+                    return;
+                end
                 if self.verbose == 2
                     fprintf('Halving Step Size\n');
                 end
                 t = t/2;
-                
-                % Check whether step has become too small
-                if sum(abs(t * d)) < self.progTol * norm(d) || ...
-                        t == 0 || iterLS > self.maxIterLS
-                    if self.verbose == 2
-                        fprintf('Line Search failed\n');
-                    end
-                    t = 0;
-                    failed = true;
-                    xNew = x;
-                    fNew = f;
-                    gNew = g;
-                    return;
-                end
-                
-                % Evaluate New Point
-                xNew = x + t * d;
-                [fNew, gNew] = self.nlp.obj(xNew);
                 iterLS = iterLS + 1;
             end
         end % backtracking
