@@ -1,0 +1,68 @@
+
+*----------------------------------------------------------*
+			Pnb Solver 
+*----------------------------------------------------------*
+
+     Problem name:                       
+  Total variables: 16240          Total constraints:     0
+             free:     0                     linear:     0
+            lower: 16240                  nonlinear:     0
+            upper:     0                   equality:     0
+          low/upp:     0                      lower:     0
+            fixed:     0                      upper:     0
+
+Parameters
+----------
+maxIter        :       100000	 optTol        :      1.0e-10
+suffDec        :      1.0e-04	 maxIterLS     :           50
+
+ Iteration   FunEvals            fObj          ||Pg||   nWorking
+         1          1     8.12000e+05     2.17163e+02      16240
+         2          3     8.65049e-10     3.76231e-06      16240
+         3          5     1.92261e-25     7.25448e-14      16240
+
+EXIT PNB: All working variables satisfy optimality condition\n
+CONVERGENCE: 1
+||Pg|| =  7.3e-14
+Stop tolerance =  2.2e-08
+
+ No. of iterations                 3     Objective value     1.92261180e-25
+ No. of calls to objective         5     No. of calls to gradient         3
+ No. of Hessian-vector prods     578 
+
+ Time: function evals       0.01 (  1%)  gradient evals         0.01(  1%)
+ Time: Hessian-vec prods    0.43 ( 45%)  total solve            0.96(100%)
+
+*----------------------------------------------------------*
+			Pnb Solver 
+*----------------------------------------------------------*
+
+     Problem name:                       
+  Total variables: 16240          Total constraints:     0
+             free:     0                     linear:     0
+            lower: 16240                  nonlinear:     0
+            upper:     0                   equality:     0
+          low/upp:     0                      lower:     0
+            fixed:     0                      upper:     0
+
+Parameters
+----------
+maxIter        :       100000	 optTol        :      1.0e-10
+suffDec        :      1.0e-04	 maxIterLS     :           50
+
+ Iteration   FunEvals            fObj          ||Pg||   nWorking
+         1          1     8.12000e+05     2.17163e+02      16240
+         2          3     1.13512e-08     4.73327e-06      16240
+         3          5     4.62797e-24     1.13134e-13      16240
+
+EXIT PNB: All working variables satisfy optimality condition\n
+CONVERGENCE: 1
+||Pg|| =  1.1e-13
+Stop tolerance =  2.2e-08
+
+ No. of iterations                 3     Objective value     4.62797399e-24
+ No. of calls to objective         5     No. of calls to gradient         3
+ No. of Hessian-vector prods   28439 
+
+ Time: function evals       0.01 (  0%)  gradient evals         0.01(  0%)
+ Time: Hessian-vec prods   23.91 ( 43%)  total solve           55.47(100%)

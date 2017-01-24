@@ -44,12 +44,14 @@ classdef PnSolver < handle
         fid;
         eqTol;
         lsFunc; % Line search function
+        cgIter;
     end
     
     properties (Hidden = true, Constant)
-        LOG_HEADER = {'Iteration', 'FunEvals', 'fObj', '||Pg||'};
-        LOG_FORMAT = '%10s %10s %15s %15s \n';
-        LOG_BODY = '%10d %10d %15.5e %15.5e\n';
+        LOG_HEADER = {'Iteration', 'CG iter', 'FunEvals', 'fObj', ...
+            '||Pg||'};
+        LOG_FORMAT = '%10s %10s %10s %15s %15s \n';
+        LOG_BODY = '%10d %10d %10d %15.5e %15.5e\n';
         EXIT_MSG = { ...
             'All working variables satisfy optimality condition\n', ... % 1
             'Function value changing by less than funcTol\n', ...       % 2
@@ -58,7 +60,7 @@ classdef PnSolver < handle
             'Maximum number of iterations in line search reached\n', ...% 5
             'Projected CG exit without convergence\n', ...              % 6
             };
-        CG_TOL = 0.1;
+        CG_TOL = 1e-10;
     end % constant properties
     
     
@@ -103,6 +105,7 @@ classdef PnSolver < handle
             self.solveTime = tic;
             self.iter = 1;
             self.iStop = 0;
+            self.cgIter = 0;
             
             % Output Log
             if self.verbose >= 2
@@ -132,8 +135,8 @@ classdef PnSolver < handle
                 self.nObjFunc = self.nlp.ncalls_fobj + ...
                     self.nlp.ncalls_fcon;
                 if self.verbose >= 2
-                    fprintf(self.LOG_BODY, self.iter, self.nObjFunc, f, ...
-                        pgnrm);
+                    fprintf(self.LOG_BODY, self.iter, self.cgIter, ...
+                        self.nObjFunc, f, pgnrm);
                 end
                 
                 % Checking various stopping conditions, exit if true
@@ -152,13 +155,13 @@ classdef PnSolver < handle
                 end
                 
                 % Compute descent direction
-                [p, info] = self.projCg(-H*x + g, H, norm(g));
+                [p, info] = self.projCg2(H*x - g, H, norm(g), x);
                 if info ~= 1
                     self.iStop = 6;
                     break;
                 end
-                d = p - x;
-                
+                d = x - p;
+
                 % Compute Armijo line search
                 x = self.armijo(x, f, g, d);
                 
@@ -257,7 +260,51 @@ classdef PnSolver < handle
             fprintf(self.fid, varargin{:});
         end
         
-        function [w, info] = projCg(self, g, H, gNrm)
+        function [w, info] = projCg2(self, g, H, gNrm, x)
+            %% ProjCg
+            %       min_w   q(w) := 0.5*(w - x)'*H*(w - x) + g'*(w - x)
+            %       st      w \in X
+            %
+            % On exit info is set as follows:
+            %
+            %       info = 1  Convergence in the original variables.
+            %       info = 2  Failure to converge within iterMax iterations
+            
+            % Initialize the iterate w and the residual r.
+            w = x;
+            % Initialize the residual r of grad q to -g.
+            r = g;
+            % Initialize the direction p.
+            p = -r;
+            rTol = max(gNrm * self.CG_TOL, 1e-8);
+            iterMax = max(1e4, self.nlp.n);
+            for iters = 1:iterMax
+                % Initialize rho and the norms of r.
+                rho = r'*r;
+                % Project on the constraint set
+                p = self.nlp.project(p);
+                % Compute alph
+                Hp = H * p;
+                ptHp = p'*Hp;
+                alph = rho/ptHp;
+                % Update w and the residuals r.
+                w = w + alph*p;
+                r = r + alph*Hp;
+                % Exit if the residual convergence test is satisfied.
+                rtr = r'*r;
+                if sqrt(rtr) <=  rTol
+                    info = 1;
+                    self.cgIter = iters;
+                    return
+                end
+                % Compute p = r + beta*p and update rho.
+                p = -r + rtr/rho * p;
+            end % for loop
+            self.cgIters = iters;
+            info = 2;
+        end % projcg
+        
+        function [w, info] = projCg(self, g, H, gNrm, x)
             %% ProjCg
             %       min_w   q(w) := 0.5*(w - x)'*H*(w - x) + g'*(w - x)
             %       st      w \in X

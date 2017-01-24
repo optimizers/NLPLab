@@ -102,6 +102,10 @@ classdef ProjModel < model.LeastSquaresModel
             zProj = max(z, self.bL); % min(max(z, self.bL), self.bU)
         end
         
+        function z = funcPrecond(self, x, ind)
+            %% Apply preconditionner
+            z = (1./(self.prec.Mdiag(ind).^2)) .* x;
+        end
         
         %% The following functions are redefined from the parent class
         function hess = hobj_local(self, z)
