@@ -53,7 +53,7 @@ classdef LeastSquaresModel < model.NlpModel
         end
         
         function f = fobj_local(self, x)
-            f = 1/2 * norm(self.A * x - self.b);
+            f = 1/2 * norm(self.A * x - self.b)^2;
         end
         
         function g = gobj_local(self, x)

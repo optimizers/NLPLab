@@ -19,7 +19,7 @@ MPDIR = fullfile(DATADIR, 'projMatrices');
 %% Creating the phantom data and the sinogram
 % --- genData parameters ---
 % Resolution reduction factor compared to original (>= 1)
-FACTOR = 1;
+FACTOR = 4;
 % --- genCrit parameters ---
 critPars.lambda = 1e-00;
 critPars.delta = 5e-03;
@@ -249,7 +249,6 @@ for r = [75, 50, 25, 0]
         data.(name) = [RANGE, solver.iter, solver.nObjFunc, ...
             solver.nGrad, solver.nHess, solver.pgNorm, solver.solveTime];
     end
-    
     
     %% Spg
     projModel = ProjModel(prec, crit.J{2}.GeoS);
