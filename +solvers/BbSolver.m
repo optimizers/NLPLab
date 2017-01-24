@@ -133,6 +133,9 @@ classdef BbSolver < solvers.NlpSolver
                 % Evaluate gradient at new x
                 g = self.nlp.gobj(x);
                 
+                % Compute new step length according to BB rule
+                alph = self.bbStepLength(xOld, x, gOld, g);
+                
                 % Output log
                 pgnrm = norm(self.project(x - g) - x);
                 if self.verbose >= 2
@@ -156,9 +159,6 @@ classdef BbSolver < solvers.NlpSolver
                 if self.iStop ~= 0
                     break;
                 end
-                
-                % Compute new step length according to BB rule
-                alph = self.bbStepLength(xOld, x, gOld, g);
                 
                 self.iter = self.iter + 1;
             end % main loop
@@ -254,6 +254,7 @@ classdef BbSolver < solvers.NlpSolver
         
         function alph = bbStepLength(self, xOld, x, gOld, g)
             %% BBStepLength - Compute Barzilai-Borwein step length
+            % alph_BB = (s' * s) / (s' * y)
             s = x - xOld;
             % Denominator of Barzilai-Borwein step length
             betaBB = s' * (g - gOld);
@@ -270,11 +271,30 @@ classdef BbSolver < solvers.NlpSolver
             end
         end % bbsteplength
         
+        function alph = bbStepLength2(self, xOld, x, gOld, g)
+            %% BBStepLength2 - Compute Barzilai-Borwein step length
+            % % alph_BB = (s' * y) / (y' * y)
+            y = g - gOld;
+            % Denominator of Barzilai-Borwein step length
+            betaBB = y' * y;
+            if betaBB < 0
+                % Fall back to maximal step length
+                alph = self.ALPH_MAX;
+            else
+                % Compute Barzilai-Borwein step length
+                % s = x - xOld
+                % alph_BB = (s' * y) / (y' * y)
+                % Assert alph \in [alph_min, alph_max]
+                alph = min(self.ALPH_MAX, ...
+                    max(self.ALPH_MIN, ((x - xOld)' * y) / betaBB));
+            end
+        end % bbsteplength
+        
         function [xNew, fNew, t] = nmArmijo(self, x, f, g, d)
             %% NmArmijo - Non-monotone Armijo Line Search
             
             % Update stored objective function values
-            self.storedObjFunc(mod(self.iter, self.memory) + 1) = f;
+            self.storedObjFunc(mod(self.iter - 1, self.memory) + 1) = f;
             % Redefine f as the maximum
             fMax = max(self.storedObjFunc);
             
