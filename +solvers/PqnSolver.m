@@ -65,8 +65,6 @@ classdef PqnSolver < solvers.NlpSolver
         maxIterLS; % Maximal number of iterations in the linesearch
         fid;
         % SPG sub-problem parameters
-        spgaOptTol; % Sub-problem optimality tolerance
-        spgProgTol; % Sub-problem progression tolerance
         spgTestOpt; % Ensure that sub-problem is solved to optimality
         spgVerbose; % Ouput in MinConf_SPG (0, 1 or 2)
         spgUseSpectral; % Modified descent (either bbType true or false)
@@ -131,8 +129,6 @@ classdef PqnSolver < solvers.NlpSolver
             p.addParameter('fid', 1);
             p.addParameter('maxIterLS', 50); % Max iters for linesearch
             % SPG sub-problem parameters
-            p.addParameter('spgaOptTol', 1e-5);
-            p.addParameter('spgProgTol', 1e-9);
             p.addParameter('spgTestOpt', 1);
             p.addParameter('spgVerbose', 0);
             p.addParameter('spgUseSpectral', 1);
@@ -157,8 +153,6 @@ classdef PqnSolver < solvers.NlpSolver
             self.maxIterLS = p.Results.maxIterLS;
             self.fid = p.Results.fid;
             % SPG sub-problem parameters
-            self.spgaOptTol = p.Results.spgaOptTol;
-            self.spgProgTol = p.Results.spgProgTol;
             self.spgTestOpt = p.Results.spgTestOpt;
             self.spgVerbose = p.Results.spgVerbose;
             self.spgUseSpectral = p.Results.spgUseSpectral;
@@ -365,10 +359,6 @@ classdef PqnSolver < solvers.NlpSolver
                     self.printf('\t%-15s: %3s %8d\n', ' adjustStep', '', ...
                         self.adjustStep);
                     self.printf('\nSPG parameters\n--------------\n')
-                    self.printf('%-15s: %3s %8.1e', 'spgaOptTol', '', ...
-                        self.spgaOptTol);
-                    self.printf('\t%-15s: %3s %8.1e\n', ' spgProgTol', ...
-                        '', self.spgProgTol);
                     self.printf('%-15s: %3s %8d', 'spgTestOpt', '', ...
                         self.spgTestOpt);
                     self.printf('\t%-15s: %3s %8d\n', ' spgVerbose', ...
@@ -463,7 +453,7 @@ classdef PqnSolver < solvers.NlpSolver
             SpgOptions.projectLS = self.spgProjectLS;
             SpgOptions.bbType = self.spgBbType;
             SpgOptions.memory = self.spgMemory;
-            SpgOptions.maxIter = 1e4;
+            SpgOptions.maxIter = self.maxIter;
             
             % Building a quadratic approximation
             import model.ShiftedQpModel;

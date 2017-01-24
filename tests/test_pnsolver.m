@@ -2,17 +2,17 @@ clc;
 clear all;
 close all;
 
+%% Seting MATLAB's path
+addpath('~/Masters/nlplab');
+addpath('~/Masters/logging4matlab/');
+addpath('~/Masters/Spot');
+
 %% Format
 HEADER = {'Solver', '#iter', '#f', '#g', '#H', '|Pg|', ...
     '|x*-x|', 'RT'};
 HEADER_FORMAT = ['%25s', repmat('%10s ', 1, 7), '\n'];
 BODY_FORMAT = '%25s %10d %10d %10d %10d %10.1e %10.1e %10.1e\n';
 outInfo = {};
-
-%% Seting MATLAB's path
-addpath('~/Masters/nlplab');
-addpath('~/Masters/logging4matlab/');
-addpath('~/Masters/Spot');
 
 %% Building the model
 % Quadratic objective function, upper and lower bounds

@@ -29,6 +29,7 @@ classdef PnbSolver < handle
         % optTol relative to the initial gradient norm
         stopTol;
         relFuncTol;
+        precond;
     end
     
     properties (Access = private, Hidden = false)
@@ -83,6 +84,7 @@ classdef PnbSolver < handle
             p.addParameter('funcTol', eps);
             p.addParameter('exactLS', false);
             p.addParameter('fid', 1);
+            p.addParameter('precond', false);
             
             p.parse(varargin{:});
             self.verbose = p.Results.verbose;
@@ -93,6 +95,7 @@ classdef PnbSolver < handle
             self.maxIterLS = p.Results.maxIterLS;
             self.funcTol = p.Results.funcTol;
             self.fid = p.Results.fid;
+            self.precond = p.Results.precond;
             
             % Exact line search is only implemented for quadratic or least
             % squares models
@@ -176,7 +179,11 @@ classdef PnbSolver < handle
                 H = H(working, working);
                 
                 % Compute Newton direction for free variables only
-                d = self.newtonDir(g, H);
+                if self.precond
+                    d = self.precNewtonDir(g, H, working);
+                else
+                    d = self.newtonDir(g, H);
+                end
                 
                 % Compute restricted projected Armijo line search
                 xNew = self.lsFunc(xNew, f, x, g, d, H, working);
@@ -314,7 +321,12 @@ classdef PnbSolver < handle
             % identify more variables that should be fixed.
             
             % Compute a Newton direction from reduced g & H
-            d = self.newtonDir(g(~gFixed), H(~gFixed, ~gFixed));
+            if self.precond
+                d = self.precNewtonDir(g(~gFixed), H(~gFixed, ~gFixed), ...
+                    ~gFixed);
+            else
+                d = self.newtonDir(g(~gFixed), H(~gFixed, ~gFixed));
+            end
             
             % We restrict x to the free variables
             x = x(~gFixed);
@@ -338,6 +350,19 @@ classdef PnbSolver < handle
             % Different methods could be used. Using PCG for now.
             [d, ~] = pcg(H, g, self.optTol + self.stopTol, ...
                 max(1e4, self.nlp.n));
+        end
+        
+        function d = precNewtonDir(self, g, H, ind)
+            %% NewtonDir - computes a Newton descent direction
+            % Solves the equation H * d = -g, using the gradient and
+            % hessian provided as input arguments, assuming they are of
+            % reduced size. This descent direction should only be computed
+            % on the free variables.
+            
+            % Different methods could be used. Using PCG for now.
+            [d, ~] = pcg(H, g, self.optTol + self.stopTol, ...
+                max(1e4, self.nlp.n), ...
+            @(x, varargin) self.nlp.funcPrecond(x, ind));
         end
         
         function xNew = restrictedArmijo(self, xNew, f, x, g, d, ~, ...
