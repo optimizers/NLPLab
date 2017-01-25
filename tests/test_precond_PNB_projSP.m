@@ -127,7 +127,7 @@ for r = [75, 50, 25, 0]
 end
 
 %% Printing
-fid = fopen('data/latex-output.txt', 'w');
+fid = fopen(['data/latex-output-prec', num2str(FACTOR), '.txt'], 'w');
 fprintf('\n\n\n');
 fprintf(HEADER_FORMAT, HEADER{:});
 fprintf(fid, HEADER_FORMAT, HEADER_LATEX{:});
@@ -140,4 +140,4 @@ end
 fclose(fid);
 
 %% Plot struct data
-plotStructData(data, HEADER(2:end));
+plotStructData(data, HEADER(2:end), FACTOR);

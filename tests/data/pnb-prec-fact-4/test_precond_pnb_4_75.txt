@@ -1,0 +1,108 @@
+
+*----------------------------------------------------------*
+			Pnb Solver 
+*----------------------------------------------------------*
+
+     Problem name:                       
+  Total variables: 16240          Total constraints:     0
+             free:     0                     linear:     0
+            lower: 16240                  nonlinear:     0
+            upper:     0                   equality:     0
+          low/upp:     0                      lower:     0
+            fixed:     0                      upper:     0
+
+Parameters
+----------
+maxIter        :       100000	 optTol        :      1.0e-10
+suffDec        :      1.0e-04	 maxIterLS     :           50
+
+ Iteration   FunEvals            fObj          ||Pg||   nWorking
+         1          1     8.12000e+05     9.39771e+01       4036
+         2          3     5.88352e+05     6.30551e+01       4026
+         3          5     5.86107e+05     5.53986e+01       4018
+         4          7     5.84654e+05     4.91475e+01       4012
+         5          9     5.83621e+05     4.38314e+01       4008
+         6         11     5.82840e+05     3.91858e+01       4004
+         7         13     5.82232e+05     3.50579e+01       4000
+         8         15     5.81753e+05     3.13499e+01       3998
+         9         17     5.81363e+05     2.79720e+01       3996
+        10         19     5.81036e+05     2.48542e+01       3994
+        11         21     5.80760e+05     2.19606e+01       3992
+        12         23     5.80527e+05     1.92634e+01       3990
+        13         25     5.80331e+05     1.67413e+01       3988
+        14         27     5.80167e+05     1.43775e+01       3986
+        15         29     5.80029e+05     1.21586e+01       3984
+        16         31     5.79916e+05     1.00742e+01       3982
+        17         33     5.79825e+05     8.11649e+00       3980
+        18         35     5.79753e+05     6.27935e+00       3978
+        19         37     5.79699e+05     4.55863e+00       3976
+        20         39     5.79661e+05     2.95175e+00       3974
+        21         41     5.79639e+05     1.45771e+00       3972
+        22         43     5.79631e+05     7.70668e-02       3970
+        23         45     5.79631e+05     1.34300e-09       3970
+
+EXIT PNB: All working variables satisfy optimality condition\n
+CONVERGENCE: 1
+||Pg|| =  1.3e-09
+Stop tolerance =  2.0e-08
+
+ No. of iterations                23     Objective value     5.79631336e+05
+ No. of calls to objective        45     No. of calls to gradient        23
+ No. of Hessian-vector prods    7741 
+
+ Time: function evals       0.12 (  1%)  gradient evals         0.09(  1%)
+ Time: Hessian-vec prods    5.14 ( 39%)  total solve           13.10(100%)
+
+*----------------------------------------------------------*
+			Pnb Solver 
+*----------------------------------------------------------*
+
+     Problem name:                       
+  Total variables: 16240          Total constraints:     0
+             free:     0                     linear:     0
+            lower: 16240                  nonlinear:     0
+            upper:     0                   equality:     0
+          low/upp:     0                      lower:     0
+            fixed:     0                      upper:     0
+
+Parameters
+----------
+maxIter        :       100000	 optTol        :      1.0e-10
+suffDec        :      1.0e-04	 maxIterLS     :           50
+
+ Iteration   FunEvals            fObj          ||Pg||   nWorking
+         1          1     8.12000e+05     9.39771e+01       4036
+         2          3     5.88352e+05     6.30551e+01       4026
+         3          5     5.86107e+05     5.53986e+01       4018
+         4          7     5.84654e+05     4.91475e+01       4012
+         5          9     5.83621e+05     4.38314e+01       4008
+         6         11     5.82840e+05     3.91859e+01       4004
+         7         13     5.82232e+05     3.50579e+01       4000
+         8         15     5.81753e+05     3.13499e+01       3998
+         9         17     5.81363e+05     2.79720e+01       3996
+        10         19     5.81036e+05     2.48542e+01       3994
+        11         21     5.80760e+05     2.19606e+01       3992
+        12         23     5.80527e+05     1.92634e+01       3990
+        13         25     5.80331e+05     1.67413e+01       3988
+        14         27     5.80167e+05     1.43775e+01       3986
+        15         29     5.80029e+05     1.21586e+01       3984
+        16         31     5.79916e+05     1.00742e+01       3982
+        17         33     5.79825e+05     8.11649e+00       3980
+        18         35     5.79753e+05     6.27935e+00       3978
+        19         37     5.79699e+05     4.55863e+00       3976
+        20         39     5.79661e+05     2.95175e+00       3974
+        21         41     5.79639e+05     1.45771e+00       3972
+        22         43     5.79631e+05     7.70669e-02       3970
+        23         45     5.79631e+05     1.33184e-09       3970
+
+EXIT PNB: All working variables satisfy optimality condition\n
+CONVERGENCE: 1
+||Pg|| =  1.3e-09
+Stop tolerance =  2.0e-08
+
+ No. of iterations                23     Objective value     5.79631336e+05
+ No. of calls to objective        45     No. of calls to gradient        23
+ No. of Hessian-vector prods   13053 
+
+ Time: function evals       0.07 (  0%)  gradient evals         0.05(  0%)
+ Time: Hessian-vec prods    8.97 ( 38%)  total solve           23.40(100%)

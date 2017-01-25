@@ -125,7 +125,7 @@ for r = [75, 50, 25, 0]
             solver.nGrad, solver.nHess, solver.pgNorm, solver.solveTime];
     end
     
-    % LSQR (Spot)
+    % LSMR (Spot)
     projModel = ProjModel(prec, crit.J{2}.GeoS);
     projModel.setPointToProject(x0);
     mcOpts.method = 'lsmr';
@@ -149,7 +149,6 @@ for r = [75, 50, 25, 0]
         data.(name) = [RANGE, solver.iter, solver.nObjFunc, ...
             solver.nGrad, solver.nHess, solver.pgNorm, solver.solveTime];
     end
-    
     
     % PCG
     projModel = ProjModel(prec, crit.J{2}.GeoS);
@@ -176,7 +175,6 @@ for r = [75, 50, 25, 0]
             solver.nGrad, solver.nHess, solver.pgNorm, solver.solveTime];
     end
     
-    
     % MINRES (Spot)
     projModel = ProjModel(prec, crit.J{2}.GeoS);
     projModel.setPointToProject(x0);
@@ -202,7 +200,6 @@ for r = [75, 50, 25, 0]
             solver.nGrad, solver.nHess, solver.pgNorm, solver.solveTime];
     end
     
-    
     %% Pnb
     projModel = ProjModel(prec, crit.J{2}.GeoS);
     projModel.setPointToProject(x0);
@@ -225,7 +222,6 @@ for r = [75, 50, 25, 0]
         data.(name) = [RANGE, solver.iter, solver.nObjFunc, ...
             solver.nGrad, solver.nHess, solver.pgNorm, solver.solveTime];
     end
-    
     
     %% Bb
     projModel = ProjModel(prec, crit.J{2}.GeoS);
@@ -272,7 +268,6 @@ for r = [75, 50, 25, 0]
         data.(name) = [RANGE, solver.iter, solver.nObjFunc, ...
             solver.nGrad, solver.nHess, solver.pgNorm, solver.solveTime];
     end
-    
     
     %% Pqn
     projModel = ProjModel(prec, crit.J{2}.GeoS);
