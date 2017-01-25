@@ -152,6 +152,9 @@ classdef TmpSolver < solvers.NlpSolver
             end
             
             self.krylOpts.etol = self.aOptTol;
+            self.krylOpts.rtol = self.aOptTol;
+            self.krylOpts.atol = self.aOptTol;
+            self.krylOpts.btol = self.aOptTol;
             self.krylOpts.shift = 0;
             self.krylOpts.show = false;
             self.krylOpts.check = false;
@@ -209,7 +212,6 @@ classdef TmpSolver < solvers.NlpSolver
             end
             
             self.rOptTol = self.aOptTol * norm(g);
-            self.krylOpts.rtol = self.rOptTol;
                         
             % Compute working set (inactive constraints)
             working = self.working(x, g);

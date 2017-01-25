@@ -314,12 +314,8 @@ classdef PnbSolver < handle
             % identify more variables that should be fixed.
             
             % Compute a Newton direction from reduced g & H
-            if self.precond
-                d = self.precNewtonDir(g(~gFixed), H(~gFixed, ~gFixed), ...
-                    ~gFixed);
-            else
-                d = self.newtonDir(g(~gFixed), H(~gFixed, ~gFixed));
-            end
+            d = self.newtonDir(g(~gFixed), H(~gFixed, ~gFixed));
+
             
             % We restrict x to the free variables
             x = x(~gFixed);

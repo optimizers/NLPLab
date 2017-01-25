@@ -1,0 +1,43 @@
+
+EXIT TMP: Directional derivative below aOptTol\n
+CONVERGENCE: 1
+||Pg|| =  3.0e-07
+Stop tolerance =  2.0e-08
+
+EXIT TMP: Directional derivative below aOptTol\n
+CONVERGENCE: 1
+||Pg|| =  2.9e-07
+Stop tolerance =  2.0e-08
+
+EXIT TMP: All working variables satisfy optimality condition\n
+CONVERGENCE: 1
+||Pg|| =  3.2e-09
+Stop tolerance =  2.0e-08
+
+EXIT TMP: All working variables satisfy optimality condition\n
+CONVERGENCE: 1
+||Pg|| =  4.1e-10
+Stop tolerance =  2.0e-08
+
+EXIT PNB: All working variables satisfy optimality condition\n
+CONVERGENCE: 1
+||Pg|| =  3.2e-09
+Stop tolerance =  2.0e-08
+
+EXIT Bb: Function value changing by less than frTol\n
+CONVERGENCE: 1
+||Pg|| =  2.2e-02
+Stop tolerance =  2.0e-08
+
+EXIT SPG: Function value changing by less than progTol\n
+CONVERGENCE: 1
+||Pg|| =  9.4e-02
+Stop tolerance =  2.0e-08
+
+EXIT PQN: Directional Derivative below progTol\n
+CONVERGENCE: 1
+||Pg|| =  2.3e-05
+Stop tolerance =  2.0e-08
+
+EXIT L-BFGS-B: CONVERGENCE: REL_REDUCTION_OF_F_<=_FACTR*EPSMCH             
+||Pg|| =  2.6e-03
