@@ -45,6 +45,7 @@ classdef PnSolver < handle
         eqTol;
         lsFunc; % Line search function
         cgIter;
+        cgTol;
     end
     
     properties (Hidden = true, Constant)
@@ -60,7 +61,6 @@ classdef PnSolver < handle
             'Maximum number of iterations in line search reached\n', ...% 5
             'Projected CG exit without convergence\n', ...              % 6
             };
-        CG_TOL = 1e-10;
     end % constant properties
     
     
@@ -98,6 +98,7 @@ classdef PnSolver < handle
             self.maxIterLS = p.Results.maxIterLS;
             self.funcTol = p.Results.funcTol;
             self.fid = p.Results.fid;
+            self.cgTol = self.optTol;
         end % constructor
         
         function self = solve(self)
@@ -276,7 +277,7 @@ classdef PnSolver < handle
             r = g;
             % Initialize the direction p.
             p = -r;
-            rTol = max(gNrm * self.CG_TOL, 1e-8);
+            rTol = max(gNrm * self.cgTol, 1e-8);
             iterMax = max(1e4, self.nlp.n);
             for iters = 1:iterMax
                 % Initialize rho and the norms of r.
@@ -300,7 +301,7 @@ classdef PnSolver < handle
                 % Compute p = r + beta*p and update rho.
                 p = -r + rtr/rho * p;
             end % for loop
-            self.cgIters = iters;
+            self.cgIter = iters;
             info = 2;
         end % projcg
         
@@ -324,7 +325,7 @@ classdef PnSolver < handle
             % Initialize rho and the norms of r.
             rho = r'*r;
             
-            rTol = gNrm * self.CG_TOL;
+            rTol = gNrm * self.cgTol;
             
             % Exit if g = 0.
             if sqrt(rho) == 0

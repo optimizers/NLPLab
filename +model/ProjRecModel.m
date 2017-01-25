@@ -69,7 +69,8 @@ classdef ProjRecModel < model.RecModel
             
             % Variable that we desire to project on the constraint set
             % Here x is \bar{x}
-            self.projSolver.nlp.setPointToProject(x);
+            % LeastSquares has the form ||Ax - b||^2, therefore b := -x
+            self.projSolver.nlp.setPointToProject(-x);
             
             % Calling the solver to solve the problem
             self.projSolver.solve();
