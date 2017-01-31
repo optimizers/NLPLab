@@ -19,7 +19,7 @@ MPDIR = fullfile(DATADIR, 'projMatrices');
 %% Creating the phantom data and the sinogram
 % --- genData parameters ---
 % Resolution reduction factor compared to original (>= 1)
-FACTOR = 4;
+FACTOR = 1;
 % --- genCrit parameters ---
 critPars.lambda = 1e-00;
 critPars.delta = 5e-03;
