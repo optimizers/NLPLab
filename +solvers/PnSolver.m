@@ -156,12 +156,11 @@ classdef PnSolver < handle
                 end
                 
                 % Compute descent direction
-                [p, info] = self.projCg2(H*x - g, H, norm(g), x);
+                [d, info] = self.projCg(x, g, H);
                 if info ~= 1
                     self.iStop = 6;
                     break;
                 end
-                d = x - p;
 
                 % Compute Armijo line search
                 x = self.armijo(x, f, g, d);
@@ -261,9 +260,9 @@ classdef PnSolver < handle
             fprintf(self.fid, varargin{:});
         end
         
-        function [w, info] = projCg2(self, g, H, gNrm, x)
+        function [z, info] = projCg(self, x, g, H)
             %% ProjCg
-            %       min_w   q(w) := 0.5*(w - x)'*H*(w - x) + g'*(w - x)
+            %       min_w   q(w) := 0.5*w'*H*w + g'*w
             %       st      w \in X
             %
             % On exit info is set as follows:
@@ -272,25 +271,24 @@ classdef PnSolver < handle
             %       info = 2  Failure to converge within iterMax iterations
             
             % Initialize the iterate w and the residual r.
-            w = x;
+            z = zeros(self.nlp.n, 1);
             % Initialize the residual r of grad q to -g.
-            r = g;
-            % Initialize the direction p.
-            p = -r;
-            rTol = max(gNrm * self.cgTol, 1e-8);
-            iterMax = max(1e4, self.nlp.n);
-            for iters = 1:iterMax
+            r = -g;
+            % Initialize the direction d.
+            d = r;
+            rTol = norm(g) * self.cgTol + self.cgTol;
+            for iters = 1:self.nlp.n
                 % Initialize rho and the norms of r.
                 rho = r'*r;
-                % Project on the constraint set
-                p = self.nlp.project(p);
                 % Compute alph
-                Hp = H * p;
-                ptHp = p'*Hp;
-                alph = rho/ptHp;
-                % Update w and the residuals r.
-                w = w + alph*p;
-                r = r + alph*Hp;
+                d = self.nlp.project(d);
+                Hd = H * d;
+                dtHd = d'*Hd;
+                alph = rho/dtHd;
+                % Update z and the residuals r.
+                z = z + alph * d;
+%                 z = z + self.nlp.project(alph * d);
+                r = r - alph*Hd;
                 % Exit if the residual convergence test is satisfied.
                 rtr = r'*r;
                 if sqrt(rtr) <=  rTol
@@ -298,72 +296,11 @@ classdef PnSolver < handle
                     self.cgIter = iters;
                     return
                 end
-                % Compute p = r + beta*p and update rho.
-                p = -r + rtr/rho * p;
+                % Compute d = r + beta*d and update rho.
+                d = r + (rtr/rho) * d;
             end % for loop
             self.cgIter = iters;
             info = 2;
-        end % projcg
-        
-        function [w, info] = projCg(self, g, H, gNrm, x)
-            %% ProjCg
-            %       min_w   q(w) := 0.5*(w - x)'*H*(w - x) + g'*(w - x)
-            %       st      w \in X
-            %
-            % On exit info is set as follows:
-            %
-            %       info = 1  Convergence in the original variables.
-            %       info = 2  Negative curvature direction generated.
-            %       info = 3  Failure to converge within iterMax iterations
-            
-            % Initialize the iterate w and the residual r.
-            w = zeros(self.nlp.n, 1);
-            % Initialize the residual r of grad q to -g.
-            r = -g;
-            % Initialize the direction p.
-            p = r;
-            % Initialize rho and the norms of r.
-            rho = r'*r;
-            
-            rTol = gNrm * self.cgTol;
-            
-            % Exit if g = 0.
-            if sqrt(rho) == 0
-                info = 1;
-                return
-            end
-            
-            iterMax = max(1e4, self.nlp.n);
-            for iters = 1:iterMax
-                % Project on the constraint set
-                p = self.nlp.project(p);
-                % Compute alph
-                q = H * p;
-                ptq = p'*q;
-                if ptq > 0
-                    % Positive curvature, continue
-                    alph = rho/ptq;
-                else
-                    % Negative curvature
-                    info = 2;
-                    return
-                end
-                % Update w and the residuals r.
-                w = w + alph*p;
-                r = r - alph*q;
-                % Exit if the residual convergence test is satisfied.
-                rtr = r'*r;
-                rnorm = sqrt(rtr);
-                if rnorm <=  rTol
-                    info = 1;
-                    return
-                end
-                % Compute p = r + betaFactor*p and update rho.
-                betaFactor = rtr/rho;
-                p = r + betaFactor * p;
-                rho = rtr;
-            end % for loop
-            info = 3;
         end % projcg
         
         function xNew = armijo(self, x, f, g, d)
@@ -392,6 +329,28 @@ classdef PnSolver < handle
                 % Decrease step size
                 t = t / 2;
                 iterLS = iterLS + 1;
+            end
+        end
+        
+        function indFree = getIndFree(self, x)
+            %% GetIndFree
+            % General method that finds the free variables / constraints.
+            % Problem should either be bounded or with linear constraints,
+            % but not both.
+            
+            if any(self.nlp.jLow) || any(self.nlp.jUpp)
+                indFree = (x >= self.nlp.bL) & (x <= self.nlp.bU);
+            elseif any(self.nlp.iLow) || any(self.nlp.iUpp)
+                % Linear constraints jacobian * x
+                Cx = self.nlp.fcon(x);
+                % Represents "relative" zero value, smallest approx is eps
+                appZero = max(self.optTol * self.nlp.normJac * norm(x), ...
+                    eps);
+                % Checking cU and cL also captures linear equalities
+                indFree = (self.nlp.cU - Cx >= appZero) & ...
+                    (Cx - self.nlp.cL >= appZero);
+            else
+                error('Unhandled constraints case');
             end
         end
         

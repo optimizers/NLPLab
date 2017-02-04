@@ -1,42 +1,16 @@
-classdef PnbSolver < handle
+classdef PnbSolver < solvers.NlpSolver
     %% PnbSolver - Projected Newton algorithm for bounded optimization
     
     
-    properties (Access = public)
-        % Execution time
-        solveTime;
-    end
-    
     properties (SetAccess = private, Hidden = false)
-        % NlpModel
-        nlp;
-        % x upon termination
-        x;
-        % Objective function value at x
-        fx;
         % Norm of projected gradient at x
         pgNorm;
-        % Iteration counter
-        iter;
         % Exit flag
         iStop;
-        % Solved flag
-        solved;
-        % Objective function calls counter
-        nObjFunc;
-        nGrad;
-        nHess;
-        % optTol relative to the initial gradient norm
-        stopTol;
-        relFuncTol;
     end
     
     properties (Access = private, Hidden = false)
         verbose; % 0, 1 or 2
-        % Note: optTol := || P[x - g] - x ||
-        optTol; % Optimality tolerance in the main problem
-        funcTol;
-        maxIter; % Maximum number of iterations
         maxEval; % Maximum number of calls to objective function
         suffDec; % Sufficient decrease coefficient in line search
         maxIterLS; % Maximal number of iterations in the line search
@@ -65,33 +39,26 @@ classdef PnbSolver < handle
         
         function self = PnbSolver(nlp, varargin)
             %% Constructor
-            if ~isa(nlp, 'model.NlpModel')
-                error('Model must be a NlpModel');
-            end
-            self.nlp = nlp;
             
             % Gathering optional arguments and setting default values
             p = inputParser;
             p.KeepUnmatched = true;
             p.PartialMatching = false;
             p.addParameter('verbose', 2);
-            p.addParameter('optTol', 1e-5);
-            p.addParameter('maxIter', 5e2);
             p.addParameter('maxEval', 5e2);
             p.addParameter('suffDec', 1e-4);
             p.addParameter('maxIterLS', 50); % Max iters for line search
-            p.addParameter('funcTol', eps);
             p.addParameter('exactLS', false);
             p.addParameter('fid', 1);
             
             p.parse(varargin{:});
+            
+            self = self@solvers.NlpSolver(nlp, p.Unmatched);
+            
             self.verbose = p.Results.verbose;
-            self.optTol = p.Results.optTol;
-            self.maxIter = p.Results.maxIter;
             self.maxEval = p.Results.maxEval;
             self.suffDec = p.Results.suffDec;
             self.maxIterLS = p.Results.maxIterLS;
-            self.funcTol = p.Results.funcTol;
             self.fid = p.Results.fid;
             
             % Exact line search is only implemented for quadratic or least
@@ -110,6 +77,7 @@ classdef PnbSolver < handle
         
         function self = solve(self)
             %% Solve using the Projected Newton for bounds algorithm
+            
             self.solveTime = tic;
             self.iter = 1;
             self.iStop = 0;
@@ -128,9 +96,9 @@ classdef PnbSolver < handle
             
             fOld = Inf;
             
-            % Relative stopping tolerance
-            self.stopTol = self.optTol * norm(g);
-            self.relFuncTol = self.funcTol * abs(f);
+            % Relative stopping tolerances
+            self.rOptTol = self.aOptTol * norm(g);
+            self.rFeasTol = self.aFeasTol * abs(f);
             
             %% Main loop
             while self.iStop == 0
@@ -152,9 +120,9 @@ classdef PnbSolver < handle
                 % Checking various stopping conditions, exit if true
                 if ~any(working)
                     self.iStop = 1;
-                elseif pgnrm < self.stopTol + self.optTol
+                elseif pgnrm < self.rOptTol + self.aOptTol
                     self.iStop = 2;
-                elseif abs(f - fOld) < self.relFuncTol + self.funcTol
+                elseif abs(f - fOld) < self.rFeasTol + self.aFeastol
                     self.iStop = 3;
                 elseif self.nObjFunc >= self.maxEval
                     self.iStop = 4;
@@ -209,7 +177,7 @@ classdef PnbSolver < handle
                 self.printf('\nEXIT PNB: %s\nCONVERGENCE: %d\n', ...
                     self.EXIT_MSG{self.iStop}, self.solved);
                 self.printf('||Pg|| = %8.1e\n', self.pgNorm);
-                self.printf('Stop tolerance = %8.1e\n', self.stopTol);
+                self.printf('Stop tolerance = %8.1e\n', self.rOptTol);
             end
             
             if self.verbose >= 2
@@ -235,7 +203,7 @@ classdef PnbSolver < handle
                     self.printf('%-15s: %3s %8i', 'maxIter', '', ...
                         self.maxIter);
                     self.printf('\t%-15s: %3s %8.1e\n', ' optTol', '', ...
-                        self.optTol);
+                        self.aOptTol);
                     self.printf('%-15s: %3s %8.1e', 'suffDec', '', ...
                         self.suffDec);
                     self.printf('\t%-15s: %3s %8d\n', ' maxIterLS', '', ...
@@ -316,14 +284,13 @@ classdef PnbSolver < handle
             % Compute a Newton direction from reduced g & H
             d = self.newtonDir(g(~gFixed), H(~gFixed, ~gFixed));
 
-            
             % We restrict x to the free variables
             x = x(~gFixed);
             
             % Update the gradient fixed set with the Newton fixed set
             % fixed := gradient fixed set | Newton fixed set
-            fixed(~gFixed) = (x == self.nlp.bL(~gFixed) & d > 0) | ...
-                (x == self.nlp.bU(~gFixed) & d < 0);
+            fixed(~gFixed) = (x == self.nlp.bL(~gFixed) & d < 0) | ...
+                (x == self.nlp.bU(~gFixed) & d > 0);
             
             % Finally, the working set represents the free variables
             working = ~fixed;
@@ -337,7 +304,7 @@ classdef PnbSolver < handle
             % on the free variables.
             
             % Different methods could be used. Using PCG for now.
-            [d, ~] = pcg(H, g, self.optTol + self.stopTol, ...
+            [d, ~] = pcg(H, -g, self.aOptTol + self.rOptTol, ...
                 max(1e4, self.nlp.n));
         end
         
@@ -353,7 +320,7 @@ classdef PnbSolver < handle
             t = 1;
             while true
                 % Recompute trial step on free variables
-                xNew(working) = self.projectSel(x - t * d, working);
+                xNew(working) = self.projectSel(x + t * d, working);
                 % Update objective function value
                 fNew = self.nlp.obj(xNew);
                 % Checking exit conditions
@@ -377,9 +344,9 @@ classdef PnbSolver < handle
             % projected at the end to ensure the value remains within the
             % bounds.
             % Step length must stay between 0 and 1
-            t = min(max((d' * g) / (d' * H * d), eps), 1);
+            t = min(max((d' * -g) / (d' * H * d), eps), 1);
             % Take step and project to make sure bounds are satisfied
-            xNew(working) = self.projectSel(x - t * d, working);
+            xNew(working) = self.projectSel(x + t * d, working);
         end
         
     end

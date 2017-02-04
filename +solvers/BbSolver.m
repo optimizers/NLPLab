@@ -109,6 +109,7 @@ classdef BbSolver < solvers.NlpSolver
             % Evaluate initial point & derivative
             [f, g] = self.nlp.obj(x);
             
+            % Relative stopping tolerance
             self.rOptTol = self.aOptTol * norm(g);
             self.rFeasTol = self.aFeasTol * abs(f);
             

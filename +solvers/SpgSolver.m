@@ -54,7 +54,6 @@ classdef SpgSolver < solvers.NlpSolver
     properties (Access = private, Hidden = false)
         % Internal parameters
         verbose; % 0, 1 or 2
-        progTol;
         maxEval;
         suffDec;
         memory;
@@ -80,10 +79,10 @@ classdef SpgSolver < solvers.NlpSolver
         EXIT_MSG = { ...
             ['First-Order Optimality Conditions Below optTol at', ...
             ' Initial Point\n'], ...                                    % 1
-            'Directional Derivative below progTol\n', ...               % 2
+            'Directional Derivative below feasTol\n', ...               % 2
             'First-Order Optimality Conditions Below optTol\n', ...     % 3
             'Step size below progTol\n', ...                            % 4
-            'Function value changing by less than progTol\n', ...       % 5
+            'Function value changing by less than feasTol\n', ...       % 5
             'Function Evaluations exceeds maxEval\n', ...               % 6
             'Maximum number of iterations reached\n'};                  % 7
     end % constant properties
@@ -112,7 +111,6 @@ classdef SpgSolver < solvers.NlpSolver
             p.PartialMatching = false;
             p.KeepUnmatched = true;
             p.addParameter('verbose', 2);
-            p.addParameter('progTol', 1e-9);
             p.addParameter('maxEval', 5e2);
             p.addParameter('suffDec', 1e-4);
             p.addParameter('memory', 10);
@@ -128,7 +126,6 @@ classdef SpgSolver < solvers.NlpSolver
             self = self@solvers.NlpSolver(nlp, p.Unmatched);
             
             self.verbose = p.Results.verbose;
-            self.progTol = p.Results.progTol;
             self.maxEval = p.Results.maxEval;
             self.suffDec = p.Results.suffDec;
             self.memory = p.Results.memory;
@@ -168,6 +165,7 @@ classdef SpgSolver < solvers.NlpSolver
             x = self.project(self.nlp.x0);
             [f, g] = self.nlp.obj(x);
             
+            % Relative stopping tolerance
             self.rOptTol = self.aOptTol * norm(g);
             self.rFeasTol = self.aFeasTol * abs(f);
             
@@ -211,7 +209,7 @@ classdef SpgSolver < solvers.NlpSolver
                 
                 % Check that Progress can be made along the direction
                 gtd = g' * d;
-                if gtd > -self.progTol * norm(g) * norm(d) - self.progTol
+                if gtd > -self.aFeasTol * norm(g) * norm(d) - self.aFeasTol
                     self.iStop = 2;
                     % Leaving now saves some processing
                     break;
@@ -281,8 +279,8 @@ classdef SpgSolver < solvers.NlpSolver
                         self.iStop = 3;
                     end
                 end
-                if max(abs(t * d)) < self.progTol * norm(d) + ...
-                        self.progTol
+                if max(abs(t * d)) < self.aFeasTol * norm(d) + ...
+                        self.aFeasTol
                     self.iStop = 4;
                 elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
                     self.iStop = 5;
@@ -344,7 +342,7 @@ classdef SpgSolver < solvers.NlpSolver
                     self.printf('%-15s: %3s %8.1e', 'suffDec', '', ...
                         self.suffDec);
                     self.printf('\t%-15s: %3s %8.1e\n', ' progTol', '', ...
-                        self.progTol);
+                        self.aFeasTol);
                     self.printf('%-15s: %3s %8d', 'bbType', '', ...
                         self.bbType);
                     self.printf('\t%-15s: %3s %8d\n', ' memory', '', ...
@@ -416,7 +414,7 @@ classdef SpgSolver < solvers.NlpSolver
                 t = t / 2;
                 
                 % Check whether step has become too small
-                if max(abs(t * d)) < self.progTol * norm(d) ...
+                if max(abs(t * d)) < self.aFeasTol * norm(d) ...
                         || t == 0 || iterLS > self.maxIterLS
                     if self.verbose == 2
                         fprintf('Line Search failed\n');

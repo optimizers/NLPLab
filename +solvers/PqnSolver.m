@@ -54,7 +54,6 @@ classdef PqnSolver < solvers.NlpSolver
     properties (Access = private, Hidden = false)
         % PQN parameters
         verbose; % 0, 1 or 2
-        progTol; % Progression tolerance in the main problem
         maxEval; % Maximum number of calls to objective function
         maxProj; % Maximum number of calls to project function
         suffDec; % Sufficient decrease coefficient in linesearch
@@ -77,10 +76,10 @@ classdef PqnSolver < solvers.NlpSolver
         EXIT_MSG = { ...
             ['First-Order Optimality Conditions Below aOptTol at', ...
             ' Initial Point\n'], ...                                    % 1
-            'Directional Derivative below progTol\n', ...               % 2
+            'Directional Derivative below feasTol\n', ...               % 2
             'First-Order Optimality Conditions Below aOptTol\n', ...    % 3
             'Step size below progTol\n', ...                            % 4
-            'Function value changing by less than progTol\n', ...       % 5
+            'Function value changing by less than feasTol\n', ...       % 5
             'Function Evaluations exceeds maxIter\n', ...               % 6
             'Number of projections exceeds maxProject\n', ...           % 7
             'Maximal number of iterations reached\n', ...               % 8
@@ -118,7 +117,6 @@ classdef PqnSolver < solvers.NlpSolver
             p.PartialMatching = false;
             % PQN parameters
             p.addParameter('verbose', 2);
-            p.addParameter('progTol', 1e-9);
             p.addParameter('maxEval', 5e2);
             p.addParameter('maxProj', 1e5);
             p.addParameter('suffDec', 1e-4);
@@ -142,7 +140,6 @@ classdef PqnSolver < solvers.NlpSolver
             
             % PQN parameters
             self.verbose = p.Results.verbose;
-            self.progTol = p.Results.progTol;
             self.maxEval = p.Results.maxEval;
             self.maxProj = p.Results.maxProj;
             self.suffDec = p.Results.suffDec;
@@ -189,8 +186,10 @@ classdef PqnSolver < solvers.NlpSolver
             end
             fOld = -inf;
             
+            % Relative stopping tolerance
             self.rOptTol = self.aOptTol * norm(g);
-            self.rFeasTol = self.aFeasTol * norm(f);
+            self.rFeasTol = self.aFeasTol * abs(f);
+            
             pgnrm = norm(self.gpstep(x, g));
             % Check Optimality of Initial Point
             if pgnrm < self.rOptTol + self.aOptTol
@@ -252,7 +251,7 @@ classdef PqnSolver < solvers.NlpSolver
                 gtd = g' * d;
                 
                 % We will use normgtd in the log later
-                if gtd > -self.progTol * norm(g) * norm(d) - self.progTol
+                if gtd > -self.aFeasTol * norm(g) * norm(d) - self.aFeasTol
                     % d might be null
                     self.iStop = 2;
                     % Leaving now saves some processing
@@ -283,8 +282,8 @@ classdef PqnSolver < solvers.NlpSolver
                 % Check optimality conditions
                 if pgnrm < self.rOptTol + self.aOptTol
                     self.iStop = 3;
-                elseif max(abs(t * d)) < self.progTol * norm(d) + ...
-                        self.progTol
+                elseif max(abs(t * d)) < self.aFeasTol * norm(d) + ...
+                        self.aFeasTol
                     self.iStop = 4;
                 elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
                     self.iStop = 5;
@@ -345,7 +344,7 @@ classdef PqnSolver < solvers.NlpSolver
                     self.printf('%-15s: %3s %8i', 'maxEval', '', ...
                         self.maxEval);
                     self.printf('\t%-15s: %3s %8.1e\n', ' progTol', '', ...
-                        self.progTol);
+                        self.aFeasTol);
                     self.printf('%-15s: %3s %8i', 'maxProj', '', ...
                         self.maxProj);
                     self.printf('\t%-15s: %3s %8.1e\n', ' suffDec', '', ...
@@ -447,7 +446,7 @@ classdef PqnSolver < solvers.NlpSolver
             SpgOptions.verbose = self.spgVerbose;
             % Impose optimality as fraction of the norm of the proj. grad.
             SpgOptions.aOptTol = self.aOptTol; % self.spgaOptTol;
-            SpgOptions.progTol = self.progTol; % self.spgProgTol;
+            SpgOptions.progTol = self.aFeasTol; % self.spgProgTol;
             SpgOptions.testOpt = self.spgTestOpt;
             SpgOptions.useSpectral = self.spgUseSpectral;
             SpgOptions.projectLS = self.spgProjectLS;
@@ -500,7 +499,7 @@ classdef PqnSolver < solvers.NlpSolver
                     % Armijo condition met
                     return
                     % Check whether step has become too small
-                elseif sum(abs(t * d)) < self.progTol * norm(d) || ...
+                elseif sum(abs(t * d)) < self.aFeasTol * norm(d) || ...
                         t == 0 || iterLS >= self.maxIterLS
                     if self.verbose == 2
                         fprintf('Line Search failed\n');
