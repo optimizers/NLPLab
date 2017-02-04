@@ -211,7 +211,9 @@ classdef TmpSolver < solvers.NlpSolver
                     ' direction (self.method)']);
             end
             
+            % Relative stopping tolerance
             self.rOptTol = self.aOptTol * norm(g);
+            self.rFeasTol = self.aFeasTol * abs(f);
                         
             % Compute working set (inactive constraints)
             working = self.working(x, g);

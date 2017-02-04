@@ -1,9 +1,0 @@
-                Solver &   Range &   #iter &     \#f &     \#g &     \#H &    |Pg| &      RT \\
-          PnbSolvernoprec  &          75  &          23  &          45  &          23  &        7741  &     1.3e-09  &     1.3e+01   \  
-            PnbSolverprec  &          75  &          23  &          45  &          23  &       13053  &     1.3e-09  &     2.3e+01   \  
-          PnbSolvernoprec  &          50  &          27  &          53  &          27  &       12635  &     4.7e-09  &     2.5e+01   \  
-            PnbSolverprec  &          50  &          27  &          53  &          27  &       38234  &     5.3e-09  &     8.4e+01   \  
-          PnbSolvernoprec  &          25  &          27  &          53  &          27  &       14842  &     1.8e-09  &     3.3e+01   \  
-            PnbSolverprec  &          25  &          27  &          53  &          27  &       57875  &     2.5e-09  &     1.2e+02   \  
-          PnbSolvernoprec  &           0  &           3  &           5  &           3  &         578  &     7.3e-14  &     9.4e-01   \  
-            PnbSolverprec  &           0  &           3  &           5  &           3  &       28439  &     1.1e-13  &     5.6e+01   \  
