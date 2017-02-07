@@ -1,51 +1,21 @@
-classdef PnSolver < handle
-    %% PnSolver - Projected Newton optimization algorithm on custom set
+classdef PnBcgSolver < solvers.NlpSolver
+    %% PnBcgSolver - Projected Newton using CG for bound constrained opt.
     
-    
-    properties (Access = public)
-        % Execution time
-        solveTime;
-    end
     
     properties (SetAccess = private, Hidden = false)
-        % NlpModel
-        nlp;
-        % x upon termination
-        x;
-        % Objective function value at x
-        fx;
         % Norm of projected gradient at x
         pgNorm;
-        % Iteration counter
-        iter;
         % Exit flag
         iStop;
-        % Solved flag
-        solved;
-        % Objective function calls counter
-        nObjFunc;
-        nGrad;
-        nHess;
-        % optTol relative to the initial gradient norm
-        stopTol;
-        relFuncTol;
-        memory = 10;
     end
     
     properties (Access = private, Hidden = false)
         verbose; % 0, 1 or 2
-        % Note: optTol := || P[x - g] - x ||
-        optTol; % Optimality tolerance in the main problem
-        funcTol;
-        maxIter; % Maximum number of iterations
         maxEval; % Maximum number of calls to objective function
         suffDec; % Sufficient decrease coefficient in line search
         maxIterLS; % Maximal number of iterations in the line search
         fid;
-        eqTol;
-        lsFunc; % Line search function
         cgIter;
-        cgTol;
     end
     
     properties (Hidden = true, Constant)
@@ -66,39 +36,31 @@ classdef PnSolver < handle
     
     methods (Access = public)
         
-        function self = PnSolver(nlp, varargin)
+        function self = PnBcgSolver(nlp, varargin)
             %% Constructor
-            if ~isa(nlp, 'model.NlpModel')
-                error('Model must be a NlpModel');
-            elseif ~ismethod(nlp, 'project')
+            if ~ismethod(nlp, 'project')
                 error('nlp doesn''t contain a project method');
             end
-            self.nlp = nlp;
             
             % Gathering optional arguments and setting default values
             p = inputParser;
             p.KeepUnmatched = true;
             p.PartialMatching = false;
-            p.addParameter('verbose', 2);
-            p.addParameter('optTol', 1e-5);
-            p.addParameter('maxIter', 5e2);
+            p.addParameter('verbose', 1);
             p.addParameter('maxEval', 5e2);
             p.addParameter('suffDec', 1e-4);
             p.addParameter('maxIterLS', 50); % Max iters for line search
-            p.addParameter('funcTol', eps);
-            p.addParameter('exactLS', false);
             p.addParameter('fid', 1);
             
             p.parse(varargin{:});
+            
+            self = self@solvers.NlpSolver(nlp, p.Unmatched);
+            
             self.verbose = p.Results.verbose;
-            self.optTol = p.Results.optTol;
-            self.maxIter = p.Results.maxIter;
             self.maxEval = p.Results.maxEval;
             self.suffDec = p.Results.suffDec;
             self.maxIterLS = p.Results.maxIterLS;
-            self.funcTol = p.Results.funcTol;
             self.fid = p.Results.fid;
-            self.cgTol = self.optTol;
         end % constructor
         
         function self = solve(self)
@@ -123,8 +85,8 @@ classdef PnSolver < handle
             fOld = Inf;
             
             % Relative stopping tolerance
-            self.stopTol = self.optTol * norm(g);
-            self.relFuncTol = self.funcTol * abs(f);
+            self.rOptTol = self.aOptTol * norm(g);
+            self.rFeasTol = self.aFeasTol * abs(f);
             
             %% Main loop
             while self.iStop == 0
@@ -141,9 +103,9 @@ classdef PnSolver < handle
                 end
                 
                 % Checking various stopping conditions, exit if true
-                if pgnrm < self.stopTol + self.optTol
+                if pgnrm < self.rOptTol + self.aOptTol
                     self.iStop = 1;
-                elseif abs(f - fOld) < self.relFuncTol + self.funcTol
+                elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
                     self.iStop = 2;
                 elseif self.nObjFunc >= self.maxEval
                     self.iStop = 3;
@@ -156,12 +118,13 @@ classdef PnSolver < handle
                 end
                 
                 % Compute descent direction
-                [d, info] = self.projCg(x, g, H);
+                [xs, info] = self.BCCG2(-g, H);
                 if info ~= 1
                     self.iStop = 6;
                     break;
                 end
-
+                d = xs - x;
+                
                 % Compute Armijo line search
                 x = self.armijo(x, f, g, d);
                 
@@ -190,7 +153,7 @@ classdef PnSolver < handle
                 self.printf('\nEXIT PN: %s\nCONVERGENCE: %d\n', ...
                     self.EXIT_MSG{self.iStop}, self.solved);
                 self.printf('||Pg|| = %8.1e\n', self.pgNorm);
-                self.printf('Stop tolerance = %8.1e\n', self.stopTol);
+                self.printf('Stop tolerance = %8.1e\n', self.rOptTol);
             end
             
             if self.verbose >= 2
@@ -216,7 +179,7 @@ classdef PnSolver < handle
                     self.printf('%-15s: %3s %8i', 'maxIter', '', ...
                         self.maxIter);
                     self.printf('\t%-15s: %3s %8.1e\n', ' optTol', '', ...
-                        self.optTol);
+                        self.aOptTol);
                     self.printf('%-15s: %3s %8.1e', 'suffDec', '', ...
                         self.suffDec);
                     self.printf('\t%-15s: %3s %8d\n', ' maxIterLS', '', ...
@@ -260,48 +223,127 @@ classdef PnSolver < handle
             fprintf(self.fid, varargin{:});
         end
         
-        function [z, info] = projCg(self, x, g, H)
-            %% ProjCg
-            %       min_w   q(w) := 0.5*w'*H*w + g'*w
-            %       st      w \in X
-            %
-            % On exit info is set as follows:
-            %
-            %       info = 1  Convergence in the original variables.
-            %       info = 2  Failure to converge within iterMax iterations
+        function [x, info] = BCCG2(self, b, A)
+            %% BCCG routine
             
-            % Initialize the iterate w and the residual r.
-            z = zeros(self.nlp.n, 1);
-            % Initialize the residual r of grad q to -g.
-            r = -g;
-            % Initialize the direction d.
-            d = r;
-            rTol = norm(g) * self.cgTol + self.cgTol;
-            for iters = 1:self.nlp.n
-                % Initialize rho and the norms of r.
-                rho = r'*r;
+            % Projection of current tildex stored in x
+            x = self.nlp.project(zeros(self.nlp.n, 1));
+            % Initialize the gradient
+            g = A * x - b;
+            % Initialize the binding set
+            fixed = (x == self.nlp.bU & g < 0) | ...
+                (x == self.nlp.bL & g > 0);
+            
+            % Stopping tolerance on ||r||
+            rTol = norm(g) * self.aOptTol + self.aOptTol;
+            for iter = 1:self.nlp.n
+                
+                % Free variables residual is -g, fixed variables set to 0
+                r = -g;
+                r(fixed) = 0;
+                % Updating the direction
+                if iter == 1 || ~any(fixed ~= oldFixed)
+                    p = r;
+                else
+                    p = r + ((r' * r) / rtr) * p;
+                end
+                
+                % Saving r' * r of the current iteration
+                rtr = r' * r;
                 % Compute alph
-                d = self.nlp.project(d);
-                Hd = H * d;
-                dtHd = d'*Hd;
-                alph = rho/dtHd;
-                % Update z and the residuals r.
-                z = z + alph * d;
-%                 z = z + self.nlp.project(alph * d);
-                r = r - alph*Hd;
+                q = A * p;
+                alph = rtr / (p' * q); % p' * q := curvature condition
+                
+                % Update x and evaluate its projection
+                tildex = x + alph * p;
+                x = self.nlp.project(tildex);
+                
+                if any(tildex > self.nlp.bU) || any(tildex < self.nlp.bL)
+                    g = A * x - b;
+                else % all(xp == x)
+                    g = g + alph * q;
+                end
+                
+                % Saving the fixed variables from the current iteration
+                oldFixed = fixed;
+                % Updating the binding set
+                fixed = (x == self.nlp.bU & g < 0) | ...
+                    (x == self.nlp.bL & g > 0);
+                
                 % Exit if the residual convergence test is satisfied.
-                rtr = r'*r;
-                if sqrt(rtr) <=  rTol
+                if sqrt(rtr) <=  rTol || all(fixed)
                     info = 1;
-                    self.cgIter = iters;
+                    self.cgIter = iter;
                     return
                 end
-                % Compute d = r + beta*d and update rho.
-                d = r + (rtr/rho) * d;
+                
             end % for loop
-            self.cgIter = iters;
+            self.cgIter = iter;
             info = 2;
-        end % projcg
+        end % bccg
+        
+        function [x, info] = BCCG(self, b, A)
+            %% BCCG routine
+            
+            % Initialize the iterate tildex
+            tildex = zeros(self.nlp.n, 1);
+            % Projection of current tildex stored in x
+            x = self.nlp.project(tildex);
+            % Initialize the gradient
+            g = A * x - b;
+            % Initialize the binding set
+            fixed = (x == self.nlp.bU & g < 0) | ...
+                (x == self.nlp.bL & g > 0);
+            
+            % Stopping tolerance on ||r||
+            rTol = norm(g) * self.aOptTol + self.aOptTol;
+            for iter = 1:self.nlp.n
+                
+                % Free variables residual is -g, fixed variables set to 0
+                r = -g;
+                r(fixed) = 0;
+                % Updating the direction
+                if iter == 1 || ~any(x ~= tildex) || ...
+                        ~any(fixed ~= oldFixed)
+                    p = r;
+                else
+                    p = r + ((r' * r) / rtr) * p;
+                end
+                
+                % Saving r' * r of the current iteration
+                rtr = r' * r;
+                
+                % Compute alph
+                q = A * p;
+                alph = rtr / (p' * q); % p' * q := curvature condition
+                
+                % Update x and evaluate its projection
+                tildex = x + alph * p;
+                x = self.nlp.project(tildex);
+                
+                if any(x ~= tildex)
+                    g = A * x - b;
+                else % all(xp == x)
+                    g = g + alph * q;
+                end
+                
+                % Saving the fixed variables from the current iteration
+                oldFixed = fixed;
+                % Updating the binding set
+                fixed = (x == self.nlp.bU & g < 0) | ...
+                    (x == self.nlp.bL & g > 0);
+                
+                % Exit if the residual convergence test is satisfied.
+                if sqrt(rtr) <=  rTol || all(fixed)
+                    info = 1;
+                    self.cgIter = iter;
+                    return
+                end
+                
+            end % for loop
+            self.cgIter = iter;
+            info = 2;
+        end % bccg
         
         function xNew = armijo(self, x, f, g, d)
             %% Armijo - Armijo line search
@@ -329,28 +371,6 @@ classdef PnSolver < handle
                 % Decrease step size
                 t = t / 2;
                 iterLS = iterLS + 1;
-            end
-        end
-        
-        function indFree = getIndFree(self, x)
-            %% GetIndFree
-            % General method that finds the free variables / constraints.
-            % Problem should either be bounded or with linear constraints,
-            % but not both.
-            
-            if any(self.nlp.jLow) || any(self.nlp.jUpp)
-                indFree = (x >= self.nlp.bL) & (x <= self.nlp.bU);
-            elseif any(self.nlp.iLow) || any(self.nlp.iUpp)
-                % Linear constraints jacobian * x
-                Cx = self.nlp.fcon(x);
-                % Represents "relative" zero value, smallest approx is eps
-                appZero = max(self.optTol * self.nlp.normJac * norm(x), ...
-                    eps);
-                % Checking cU and cL also captures linear equalities
-                indFree = (self.nlp.cU - Cx >= appZero) & ...
-                    (Cx - self.nlp.cL >= appZero);
-            else
-                error('Unhandled constraints case');
             end
         end
         

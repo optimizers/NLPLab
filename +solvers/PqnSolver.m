@@ -445,8 +445,8 @@ classdef PqnSolver < solvers.NlpSolver
             % setting parameters
             SpgOptions.verbose = self.spgVerbose;
             % Impose optimality as fraction of the norm of the proj. grad.
-            SpgOptions.aOptTol = self.aOptTol; % self.spgaOptTol;
-            SpgOptions.progTol = self.aFeasTol; % self.spgProgTol;
+            SpgOptions.aOptTol = self.aOptTol;
+            SpgOptions.aFeasTol = self.aFeasTol;
             SpgOptions.testOpt = self.spgTestOpt;
             SpgOptions.useSpectral = self.spgUseSpectral;
             SpgOptions.projectLS = self.spgProjectLS;

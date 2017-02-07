@@ -58,7 +58,7 @@ classdef NlpSolver < handle
             p.PartialMatching = false;
             p.KeepUnmatched = false;
             p.addParameter('name',       'generic');
-            p.addParameter('aFeasTol',  1.0e-8);
+            p.addParameter('aFeasTol',  1.0e-12);
             p.addParameter('rFeasTol',  1.0e-6);
             p.addParameter('aOptTol',   1.0e-8);
             p.addParameter('rOptTol',   1.0e-6);
