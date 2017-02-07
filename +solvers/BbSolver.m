@@ -4,18 +4,8 @@ classdef BbSolver < solvers.NlpSolver
     % convex sets by Birgin, Martinez and Raydan
     
     properties (SetAccess = private, Hidden = false)
-        % Norm of projected gradient at x
-        pgNorm;
-        % Exit flag
-        iStop;
         % Projection calls counter
         nProj;
-    end % gettable private properties
-    
-    properties (Access = private, Hidden = false)
-        % Internal parameters
-        verbose; % 0, 1 or 2
-        maxEval;
         memory;
         maxIterLS;
         fid;
@@ -66,8 +56,6 @@ classdef BbSolver < solvers.NlpSolver
             p = inputParser;
             p.PartialMatching = false;
             p.KeepUnmatched = true;
-            p.addParameter('verbose', 2);
-            p.addParameter('maxEval', 5e2);
             p.addParameter('memory', 10);
             p.addParameter('fid', 1);
             p.addParameter('maxIterLS', 50); % Max iters for linesearch
@@ -76,8 +64,6 @@ classdef BbSolver < solvers.NlpSolver
             
             self = self@solvers.NlpSolver(nlp, p.Unmatched);
             
-            self.verbose = p.Results.verbose;
-            self.maxEval = p.Results.maxEval;
             self.memory = p.Results.memory;
             self.maxIterLS = p.Results.maxIterLS;
             self.fid = p.Results.fid;

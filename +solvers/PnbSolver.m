@@ -1,17 +1,7 @@
 classdef PnbSolver < solvers.NlpSolver
     %% PnbSolver - Projected Newton algorithm for bounded optimization
     
-    
     properties (SetAccess = private, Hidden = false)
-        % Norm of projected gradient at x
-        pgNorm;
-        % Exit flag
-        iStop;
-    end
-    
-    properties (Access = private, Hidden = false)
-        verbose; % 0, 1 or 2
-        maxEval; % Maximum number of calls to objective function
         suffDec; % Sufficient decrease coefficient in line search
         maxIterLS; % Maximal number of iterations in the line search
         fid;
@@ -44,8 +34,6 @@ classdef PnbSolver < solvers.NlpSolver
             p = inputParser;
             p.KeepUnmatched = true;
             p.PartialMatching = false;
-            p.addParameter('verbose', 2);
-            p.addParameter('maxEval', 5e2);
             p.addParameter('suffDec', 1e-4);
             p.addParameter('maxIterLS', 50); % Max iters for line search
             p.addParameter('exactLS', false);
@@ -55,8 +43,6 @@ classdef PnbSolver < solvers.NlpSolver
             
             self = self@solvers.NlpSolver(nlp, p.Unmatched);
             
-            self.verbose = p.Results.verbose;
-            self.maxEval = p.Results.maxEval;
             self.suffDec = p.Results.suffDec;
             self.maxIterLS = p.Results.maxIterLS;
             self.fid = p.Results.fid;
