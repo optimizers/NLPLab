@@ -122,7 +122,7 @@ classdef PnbSolver < solvers.NlpSolver
                     self.iStop = 1;
                 elseif pgnrm < self.rOptTol + self.aOptTol
                     self.iStop = 2;
-                elseif abs(f - fOld) < self.rFeasTol + self.aFeastol
+                elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
                     self.iStop = 3;
                 elseif self.nObjFunc >= self.maxEval
                     self.iStop = 4;

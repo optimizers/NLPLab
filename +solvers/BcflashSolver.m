@@ -67,6 +67,7 @@ classdef BcflashSolver < solvers.NlpSolver
             p.addParameter('mu0', 0.01);
             p.addParameter('verbose', 2);
             p.addParameter('fid', 1);
+            p.addParameter('maxEval', 5e2);
             
             p.parse(varargin{:});
             
