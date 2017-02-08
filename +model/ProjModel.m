@@ -27,6 +27,7 @@ classdef ProjModel < model.LeastSquaresModel
         prec;
         AAt;
         normJac;
+        xbar;
     end
     
     
@@ -89,7 +90,8 @@ classdef ProjModel < model.LeastSquaresModel
         
         function setPointToProject(self, xbar)
             %% Set xbar as b in the obj. func. 1/2 * || A*x - b ||^2
-            self.b = xbar;
+            self.b = -xbar;
+            self.xbar = xbar;
         end
         
         function xProj = dualToPrimal(self, zProj)
