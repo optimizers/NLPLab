@@ -123,7 +123,7 @@ classdef SpgSolver < solvers.NlpSolver
             self.fid = p.Results.fid;
             
             import utils.PrintInfo;
-            import linesearch.nmArmijo;
+            import linesearch.nonMonotoneArmijo;
         end % constructor
         
         function self = solve(self)

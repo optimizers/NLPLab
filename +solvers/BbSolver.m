@@ -11,6 +11,7 @@ classdef BbSolver < solvers.NlpSolver
         fid;
         storedObjFunc;
         suffDec;
+        maxProj;
     end % private properties
     
     properties (Hidden = true, Constant)
@@ -24,7 +25,8 @@ classdef BbSolver < solvers.NlpSolver
             'Function value changing by less than feasTol\n', ...       % 2
             'Function Evaluations exceeds maxEval\n', ...               % 3
             'Maximum number of iterations reached\n', ...               % 4
-            'Maximum number of iterations in line search reached\n', ...% 5
+            'Maximum number of projections reached\n', ...              % 5
+            'Maximum number of iterations in line search reached\n', ...% 6
             };
         
         ALPH_MIN = 1e-3;
@@ -59,6 +61,7 @@ classdef BbSolver < solvers.NlpSolver
             p.addParameter('memory', 10);
             p.addParameter('fid', 1);
             p.addParameter('suffDec', 1e-4);
+            p.addParameter('maxProj', 1e5);
             p.addParameter('maxIterLS', 50); % Max iters for linesearch
             
             p.parse(varargin{:});
@@ -68,6 +71,7 @@ classdef BbSolver < solvers.NlpSolver
             self.memory = p.Results.memory;
             self.maxIterLS = p.Results.maxIterLS;
             self.suffDec = p.Results.suffDec;
+            self.maxProj = p.Results.maxProj;
             self.fid = p.Results.fid;
             
             % Initialize non-monotone line search objective function array
@@ -124,11 +128,16 @@ classdef BbSolver < solvers.NlpSolver
                 xOld = x;
                 gOld = g;
                 
+                % Update stored objective function values
+                self.storedObjFunc( ... 
+                    mod(self.iter - 1, self.memory) + 1) = f;
+                
                 % Perform a non-monotone Armijo line search
                 [x, f, failed, t] = linesearch.nmSpectralArmijo(self, ...
                     x, f, g, d);
                 if failed
-                    self.iStop = 5;
+                    self.iStop = 6;
+                    pgnrm = norm(self.project(x - g) - x);
                     break;
                 end
                 
@@ -156,6 +165,8 @@ classdef BbSolver < solvers.NlpSolver
                     self.iStop = 3;
                 elseif self.iter >= self.maxIter
                     self.iStop = 4;
+                elseif self.nProj >= self.maxProj
+                    self.iStop = 5;
                 end
                 
                 if self.iStop ~= 0

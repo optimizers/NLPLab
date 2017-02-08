@@ -53,6 +53,7 @@ classdef PrintInfo < handle
                     '(%3d%%)\n'], 'Time: Hessian-vec prods', t1, ...
                     t1t, 'total solve', tt, 100);
             end
+            solver.printf('\n');
         end % printHeaderFooter
         
         function header(self, solver, map)
@@ -92,6 +93,11 @@ classdef PrintInfo < handle
                     ind = ind + 1;
                 end
             end
+            if isprop(solver.nlp, 'projSolver')
+               solver.printf('\nProjection Solver = %s', ...
+                   class(solver.nlp.projSolver));
+            end
+            solver.printf('\n');
         end
         
     end
