@@ -10,6 +10,7 @@ classdef BbSolver < solvers.NlpSolver
         maxIterLS;
         fid;
         storedObjFunc;
+        suffDec;
     end % private properties
     
     properties (Hidden = true, Constant)
@@ -19,16 +20,15 @@ classdef BbSolver < solvers.NlpSolver
         LOG_FORMAT = '%10s %10s %10s %15s %15s %15s\n';
         LOG_BODY = '%10d %10d %10d %15.5e %15.5e %15.5e\n';
         EXIT_MSG = { ...
-            'First-Order Optimality Conditions Below optTol\n', ...     % 2
-            'Function value changing by less than frTol\n', ...         % 4
-            'Function Evaluations exceeds maxEval\n', ...               % 5
-            'Maximum number of iterations reached\n', ...               % 6
-            'Maximum number of iterations in line search reached\n', ...% 7
+            'First-Order Optimality Conditions Below optTol\n', ...     % 1
+            'Function value changing by less than feasTol\n', ...       % 2
+            'Function Evaluations exceeds maxEval\n', ...               % 3
+            'Maximum number of iterations reached\n', ...               % 4
+            'Maximum number of iterations in line search reached\n', ...% 5
             };
         
         ALPH_MIN = 1e-3;
         ALPH_MAX = 1e3;
-        SUFF_DEC = 1e-4;
         SIG_1 = 0.1;
         SIG_2 = 0.9;
     end % constant properties
@@ -58,6 +58,7 @@ classdef BbSolver < solvers.NlpSolver
             p.KeepUnmatched = true;
             p.addParameter('memory', 10);
             p.addParameter('fid', 1);
+            p.addParameter('suffDec', 1e-4);
             p.addParameter('maxIterLS', 50); % Max iters for linesearch
             
             p.parse(varargin{:});
@@ -66,10 +67,14 @@ classdef BbSolver < solvers.NlpSolver
             
             self.memory = p.Results.memory;
             self.maxIterLS = p.Results.maxIterLS;
+            self.suffDec = p.Results.suffDec;
             self.fid = p.Results.fid;
             
             % Initialize non-monotone line search objective function array
             self.storedObjFunc = -inf(self.memory, 1);
+            
+            import utils.PrintInfo;
+            import linesearch.nmSpectralArmijo;
         end % constructor
         
         function self = solve(self)
@@ -77,10 +82,15 @@ classdef BbSolver < solvers.NlpSolver
             
             self.solveTime = tic;
             
+            printObj = utils.PrintInfo('Bb');
+            
             % Output Log
             if self.verbose >= 2
                 % Printing header
-                self.printHeaderFooter('header');
+                extra = containers.Map( ...
+                    {'suffDec', 'maxIterLS', 'memory'}, ...
+                    {self.suffDec, self.maxIterLS, self.memory});
+                printObj.header(self, extra);
                 self.printf(self.LOG_FORMAT, self.LOG_HEADER{:});
             end
             
@@ -115,7 +125,12 @@ classdef BbSolver < solvers.NlpSolver
                 gOld = g;
                 
                 % Perform a non-monotone Armijo line search
-                [x, f, t] = self.nmArmijo(x, f, g, d);
+                [x, f, failed, t] = linesearch.nmSpectralArmijo(self, ...
+                    x, f, g, d);
+                if failed
+                    self.iStop = 5;
+                    break;
+                end
                 
                 % Evaluate gradient at new x
                 g = self.nlp.gobj(x);
@@ -128,7 +143,7 @@ classdef BbSolver < solvers.NlpSolver
                 if self.verbose >= 2
                     self.nObjFunc = self.nlp.ncalls_fobj + ...
                         self.nlp.ncalls_fcon;
-                    fprintf(self.LOG_BODY, self.iter, ...
+                    self.printf(self.LOG_BODY, self.iter, ...
                         self.nObjFunc, self.nProj, t, f, pgnrm);
                 end
                 
@@ -161,77 +176,19 @@ classdef BbSolver < solvers.NlpSolver
             %% End of solve
             self.solved = ~(self.iStop == 6 || self.iStop == 7);
             self.solveTime = toc(self.solveTime);
-            if self.verbose
-                self.printf('\nEXIT Bb: %s\nCONVERGENCE: %d\n', ...
-                    self.EXIT_MSG{self.iStop}, self.solved);
-                self.printf('||Pg|| = %8.1e\n', self.pgNorm);
-                self.printf('Stop tolerance = %8.1e\n', self.rOptTol);
-            end
-            if self.verbose >= 2
-                self.printHeaderFooter('footer');
-            end
+            
+            printObj.footer(self);
         end % solve
-        
-    end % public methods
-    
-    
-    methods (Access = private)
-        
-        function printHeaderFooter(self, msg)
-            switch msg
-                case 'header'
-                    % Print header
-                    self.printf('\n');
-                    self.printf('%s\n', ['*', repmat('-',1,58), '*']);
-                    self.printf([repmat('\t', 1, 3), 'BbSolver \n']);
-                    self.printf('%s\n\n', ['*', repmat('-',1,58), '*']);
-                    self.printf(self.nlp.formatting())
-                    self.printf('\nParameters\n----------\n')
-                    self.printf('%-15s: %3s %8d', 'maxIter', '', ...
-                        self.maxIter);
-                    self.printf('\t%-15s: %3s %8d\n', ' maxEval', '', ...
-                        self.maxEval);
-                    self.printf('%-15s: %3s %8.1e', 'optTol', '', ...
-                        self.aOptTol);
-                    self.printf('\t%-15s: %3s %8d\n', ' memory', '', ...
-                        self.memory);
-                case 'footer'
-                    % Print footer
-                    self.printf('\n')
-                    self.printf(' %-27s  %6i     %-17s  %15.8e\n', ...
-                        'No. of iterations', self.iter, ...
-                        'Objective value', self.fx);
-                    t1 = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
-                    t2 = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
-                    self.printf(' %-27s  %6i     %-17s    %6i\n', ...
-                        'No. of calls to objective' , t1, ...
-                        'No. of calls to gradient', t2);
-                    self.printf(' %-27s  %6i \n', ...
-                        'No. of Hessian-vector prods', ...
-                        self.nlp.ncalls_hvp + self.nlp.ncalls_hes);
-                    self.printf('\n');
-                    tt = self.solveTime;
-                    t1 = self.nlp.time_fobj + self.nlp.time_fcon;
-                    t1t = round(100 * t1/tt);
-                    t2 = self.nlp.time_gobj + self.nlp.time_gcon;
-                    t2t = round(100 * t2/tt);
-                    self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
-                        '(%3d%%)\n'], 'Time: function evals' , t1, t1t, ...
-                        'gradient evals', t2, t2t);
-                    t1 = self.nlp.time_hvp + self.nlp.time_hes;
-                    t1t = round(100 * t1/tt);
-                    self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
-                        '(%3d%%)\n'], 'Time: Hessian-vec prods', t1, ...
-                        t1t, 'total solve', tt, 100);
-                otherwise
-                    error('Unrecognized case in printHeaderFooter');
-            end % switch
-        end % printHeaderFooter
         
         function printf(self, varargin)
             %% Printf - prints variables arguments to a file
             fprintf(self.fid, varargin{:});
         end
+        
+    end % public methods
+    
+    
+    methods (Access = private)
         
         function z = project(self, x)
             %% Project - projecting x on the constraint set
@@ -276,44 +233,6 @@ classdef BbSolver < solvers.NlpSolver
                     max(self.ALPH_MIN, ((x - xOld)' * y) / betaBB));
             end
         end % bbsteplength
-        
-        function [xNew, fNew, t] = nmArmijo(self, x, f, g, d)
-            %% NmArmijo - Non-monotone Armijo Line Search
-            
-            % Update stored objective function values
-            self.storedObjFunc(mod(self.iter - 1, self.memory) + 1) = f;
-            % Redefine f as the maximum
-            fMax = max(self.storedObjFunc);
-            
-            iterLS = 1;
-            t = 1;
-            delta = g' * d;
-            while true
-                
-                xNew = x + t * d;
-                fNew = self.nlp.obj(xNew);
-                
-                if fNew <= fMax + self.SUFF_DEC * t * delta
-                    % Armijo condition met
-                    return
-                elseif iterLS >= self.maxIterLS
-                    % Maximal number of iterations reached, abort
-                    self.iStop = 7;
-                    return;
-                end
-                
-                % Compute new trial step length
-                tTemp = (-t^2 * delta) / (2 * ( fNew - f - t * delta));
-                % Check if new step length is valid
-                if tTemp >= self.SIG_1 && tTemp <= self.SIG_2
-                    t = tTemp;
-                else
-                    t = t / 2;
-                end
-                
-                iterLS = iterLS + 1;
-            end
-        end % nmarmijo
         
     end % private methods
     

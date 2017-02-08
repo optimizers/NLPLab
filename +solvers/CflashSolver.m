@@ -26,26 +26,19 @@ classdef CflashSolver < solvers.NlpSolver
     
     
     properties (SetAccess = private, Hidden = false)
-        pgNorm % norm of projected gradient at x
         maxCgIter      % maximum number of CG iterations per Newton step
         nSuccessIter = 0 % number of successful iterations
         cgIter = 0    % total number of CG iterations
         gNorm0         % norm of the gradient at x0
-        verbose        % log level
-        iStop          % exit flag
         exitMsg       % string indicating exit
-        backtrack      % Armijo linesearch type backtracking
         eqTol          % Tolerance for equalities (see indFree)
         nProj;         % # of projections
         maxProj;       % maximal # of projections
-    end % gettable private properties
-    
-    properties (SetAccess = private, Hidden = true)
         mu0            % sufficient decrease parameter
         cgTol
         fMin
         fid            % File ID of where to direct log output
-    end % private properties
+    end
     
     properties (Hidden = true, Constant)
         EXIT_NONE                  = 0;
@@ -120,9 +113,7 @@ classdef CflashSolver < solvers.NlpSolver
             p.addParameter('cgTol', 0.1);
             p.addParameter('fMin', -1e32);
             p.addParameter('mu0', 0.01);
-            p.addParameter('verbose', 2);
             p.addParameter('fid', 1);
-            p.addParameter('backtrack', false);
             p.addParameter('eqTol', 1e-6);
             p.addParameter('maxProj', 1e5);
             
@@ -135,17 +126,28 @@ classdef CflashSolver < solvers.NlpSolver
             self.maxCgIter = p.Results.maxCgIter;
             self.fMin = p.Results.fMin;
             self.mu0 = p.Results.mu0;
-            self.verbose = p.Results.verbose;
             self.fid = p.Results.fid;
             self.backtrack = p.Results.backtrack;
             self.eqTol = p.Results.eqTol;
             self.maxProj = p.Results.maxProj;
+            
+            import utils.PrintInfo;
         end % constructor
         
         function self = solve(self)
             %% Solve
             self.solveTime = tic;
             self.iter = 0;
+            
+            printObj = utils.PrintInfo('Cflash');
+            
+            if self.verbose >= 2
+                extra = containers.Map( ... 
+                    {'fMin', 'cgTol', 'mu0', 'maxProj', 'eqTol'}, ...
+                    {self.fMin, self.cgTol, self.mu0, self.maxProj, ...
+                    self.eqTol});
+                printObj.header(self, extra);
+            end
             
             % Make sure initial point is feasible
             x = self.project(self.nlp.x0);
@@ -222,7 +224,7 @@ classdef CflashSolver < solvers.NlpSolver
                     else
                         status = 'rej';
                     end
-                    fprintf(self.logB, self.iter, f, pgNorm, ...
+                    self.printf(self.logB, self.iter, f, pgNorm, ...
                         self.nProj, iterCg, preRed, delta, status, nFree);
                     %                     self.logger.info(sprintf(self.logB, self.iter, ...
                     %                         f, pgNorm, iterCg, preRed, delta, status, ...
@@ -289,28 +291,6 @@ classdef CflashSolver < solvers.NlpSolver
                 
                 if actRed > self.eta0 * preRed;
                     successful = true;
-                elseif self.backtrack
-                    % Enter Armijo linesearch if backtracking is enabled
-                    [x, armijoStep, info] = self.armijoLineSearch(xc, s);
-                    if info
-                        % Armijo linesearch was successful
-                        f = self.nlp.fobj(x);
-                        s = armijoStep * s;
-                        armAs = self.nlp.hobjprod(x, zeros(0,1), s);
-                        armRed = -(s' * g + 0.5 * s' * armAs);
-                        
-                        if (fc - f) > self.eta0 * armRed
-                            successful = true;
-                            delta = armijoStep * snorm;
-                            actRed = fc - f;
-                            preRed = armRed;
-                        else
-                            successful = false;
-                        end
-                    else
-                        % Failure of the Armijo linesearch
-                        successful = false;
-                    end
                 else
                     % The step is rejected
                     successful = false;
@@ -333,85 +313,14 @@ classdef CflashSolver < solvers.NlpSolver
             self.solved = ~(self.istop == 2 || self.istop == 6 || ...
                 self.istop == 7);
             self.solveTime = toc(self.solveTime);
-            if self.verbose
-                self.printf('\nEXIT PQN: %s\nCONVERGENCE: %d\n', ...
-                    self.EXIT_MSG{self.istop}, self.solved);
-                self.printf('||Pg|| = %8.1e\n', self.pgNorm);
-                self.printf('Stop tolerance = %8.1e\n', self.stopTol);
-            end
-            if self.verbose >= 2
-                self.printHeaderFooter('footer');
-            end
+
+            printObj.footer(self);
         end % solve
         
     end % public methods
     
     
     methods (Access = private)
-        
-        function printHeaderFooter(self, msg)
-            switch msg
-                case 'header'
-                    % Print header
-                    self.printf('\n');
-                    self.printf('%s\n',repmat('=',1,80));
-                    self.printf('Constrained FLASH \n');
-                    self.printf('%s\n\n',repmat('=',1,80));
-                    self.printf(self.nlp.formatting())
-                    self.printf('\nParameters\n----------\n')
-                    self.printf('%-15s: %3s %8i'  , 'iter max', '', ...
-                        self.maxIter);
-                    self.printf('%5s','');
-                    self.printf('%-15s: %3s %8.1e\n', 'aFeasTol', '', ...
-                        self.aFeasTol);
-                    self.printf('%-15s: %3s %8.1e'  , 'rFeasTol', '', ...
-                        self.rFeasTol);
-                    self.printf('%5s','');
-                    self.printf('%-15s: %3s %8.1e\n', 'fMin', '', ...
-                        self.fMin);
-                    self.printf('%-15s: %3s %8.1e', 'cgTol', '', ...
-                        self.cgTol);
-                    self.printf('%5s','');
-                    self.printf('%-15s: %3s %8.1e\n', 'aOptTol', '', ...
-                        self.aOptTol);
-                    self.printf('%-15s: %3s %8.1e', 'mu0', '', self.mu0);
-                    self.printf('%5s', '');
-                    self.printf('%-15s: %3s %8i\n', 'maxProj', '', ...
-                        self.maxProj);
-                case 'footer'
-                    % Print footer
-                    self.printf('\n');
-                    self.printf(' %-27s  %6i     %-17s  %15.8e\n', ...
-                        'No. of iterations', self.iter, ...
-                        'Objective value', self.fx);
-                    t1 = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
-                    t2 = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
-                    self.printf(' %-27s  %6i     %-17s    %6i\n', ...
-                        'No. of calls to objective' , t1, ...
-                        'No. of calls to gradient', t2);
-                    self.printf(' %-27s  %6i     %-22s  %10.2e\n',...
-                        'No. of Hessian-vector prods', ...
-                        self.nlp.ncalls_hvp + self.nlp.ncalls_hes, ...
-                        'No. of successful iterations', ...
-                        self.nSuccessIter);
-                    self.printf('\n');
-                    tt = self.solveTime;
-                    t1 = self.nlp.time_fobj + self.nlp.time_fcon;
-                    t1t = round(100 * t1/tt);
-                    t2 = self.nlp.time_gobj + self.nlp.time_gcon;
-                    t2t = round(100 * t2/tt);
-                    self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
-                        '(%3d%%)\n'], 'Time: function evals' , t1, t1t, ...
-                        'gradient evals', t2, t2t);
-                    t1 = self.nlp.time_hvp + self.nlp.time_hes;
-                    t1t = round(100 * t1/tt);
-                    self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
-                        '(%3d%%)\n'], 'Time: Hessian-vec prods', t1, ...
-                        t1t, 'total solve', tt, 100);
-                otherwise
-                    error('Unrecognized case in printHeaderFooter');
-            end % switch
-        end % printHeaderFooter
         
         function xProj = project(self, x)
             %% Project - simple wrapper to increment nProj counter
@@ -949,81 +858,6 @@ classdef CflashSolver < solvers.NlpSolver
                 brptMax = max(brptMax, brptMaxInc);
             end
         end % breakpt
-        
-        function [x, alph, info] = armijoLineSearch(self, x, s, varargin)
-            %% Armijo Linesearch Backtracking
-            % Computes an Armijo linesearch from x in the direction s. This
-            % function requires nlp model's obj to get the value of the
-            % objective function and the gradient at a point x.
-            % Inputs:
-            %   - x: initial point of the linesearch
-            %   - s: direction of the linesearch
-            %   - <varargin>: optional parameters of the method:
-            % Outputs:
-            %   - x: value obtained by the linesearch procedure
-            %   - alph: step length at the end of the procedure
-            %   - info:
-            %       true : obtained an iterate x that satisfies the Armijo
-            %       condition
-            %       false : reached number of maximal iterations or minimal
-            %       step length
-            
-            self.logger.debug('-- Entering Armijo linesearch --');
-            % Parsing optional arguments
-            p = inputParser;
-            p.addParameter('alph0', 0.9999);
-            p.addParameter('iterMax', 20);
-            p.addParameter('sTol', 1e-4);
-            p.addParameter('stepTol', 1e-6);
-            p.addParameter('tau', 0.5);
-            p.parse(varargin{:});
-            
-            % Retrieving optional arguments
-            alph0 = p.Results.alph0;
-            % Interpolation factor for the linesearch
-            tau = p.Results.tau;
-            % Tolerance on the slope
-            sTol = p.Results.sTol;
-            % Lower bound on the value of the step size
-            stepTol = p.Results.stepTol;
-            % Maximal number of iterations for the backtracking procedure
-            iterMax = p.Results.iterMax;
-            
-            % Only alph values in ]0, 1[ are allowed
-            assert((alph0 < 1) & (alph0 > 0));
-            % Only tau values in ]0, 1[ are allowed
-            assert((tau < 1) & (tau > 0));
-            
-            % Iteration counter
-            iter = 1;
-            
-            % Getting objective function and gradient value at x
-            [f, g] = self.nlp.obj(x);
-            alph = alph0;
-            while true
-                self.logger.debug(sprintf('\tα = %7.1e', alph));
-                % Armijo's condition
-                if self.nlp.fobj(x + alph * s) > f + alph * sTol * g' * s
-                    % Condition has not been met, reduce alph
-                    alph = alph * tau;
-                else
-                    % Return new value
-                    x = x + alph * s;
-                    info = true;
-                    self.logger.debug(sprintf(['Armijo linesearch', ...
-                        ' is successful']));
-                    return
-                end
-                if iter > iterMax || alph < stepTol
-                    % Too many iterations or step size too small
-                    info = false;
-                    self.logger.debug(sprintf(['Failure of the', ...
-                        ' Armijo linesearch']));
-                    return
-                end
-                iter = iter + 1;
-            end
-        end % armijo backtracking
         
     end % private methods
     

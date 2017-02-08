@@ -6,14 +6,10 @@ classdef LbfgsbSolver < solvers.NlpSolver
     
     
     properties (SetAccess = private, Hidden = false)
-        % Norm of the projected gradient at x
-        pgNorm;
-        verbose; % 0, 1, 2
         corrections;
         postProcessing = [];
         iterGuard = [];
         startAttempt = [];
-        maxEval; % Maximum number of objective function evaluations
         maxRT;
     end
     
@@ -30,19 +26,15 @@ classdef LbfgsbSolver < solvers.NlpSolver
             
             p = inputParser;
             p.KeepUnmatched = true;
-            p.addParameter('verbose', 2);
             p.addParameter('corrections', 7);
-            p.addParameter('maxEval', 5e2);
             p.addParameter('maxRT', 1e4);
             
             p.parse(varargin{:});
             
             self = self@solvers.NlpSolver(nlp, p.Unmatched);
-            
-            self.verbose = p.Results.verbose;
+
             self.corrections = p.Results.corrections;
             self.maxRT = p.Results.maxRT;
-            self.maxEval = p.Results.maxEval;
         end
         
         function self = solve(self)
