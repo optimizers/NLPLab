@@ -41,20 +41,10 @@ classdef PqnSolver < solvers.NlpSolver
     
     
     properties (SetAccess = private, Hidden = false)
-        % Norm of projected gradient at x
-        pgNorm;
         % SPG (sub-problem) iteration counter
         spgIter;
-        % Exit flag
-        iStop;
         % Projection calls counter
         nProj;
-    end % gettable private properties
-    
-    properties (Access = private, Hidden = false)
-        % PQN parameters
-        verbose; % 0, 1 or 2
-        maxEval; % Maximum number of calls to objective function
         maxProj; % Maximum number of calls to project function
         suffDec; % Sufficient decrease coefficient in linesearch
         corrections; % L-BFGS memory updates
@@ -116,8 +106,6 @@ classdef PqnSolver < solvers.NlpSolver
             p.KeepUnmatched = true;
             p.PartialMatching = false;
             % PQN parameters
-            p.addParameter('verbose', 2);
-            p.addParameter('maxEval', 5e2);
             p.addParameter('maxProj', 1e5);
             p.addParameter('suffDec', 1e-4);
             p.addParameter('corrections', 10);
@@ -139,8 +127,6 @@ classdef PqnSolver < solvers.NlpSolver
             self = self@solvers.NlpSolver(nlp, p.Unmatched);
             
             % PQN parameters
-            self.verbose = p.Results.verbose;
-            self.maxEval = p.Results.maxEval;
             self.maxProj = p.Results.maxProj;
             self.suffDec = p.Results.suffDec;
             self.corrections = p.Results.corrections;
@@ -156,6 +142,9 @@ classdef PqnSolver < solvers.NlpSolver
             self.spgProjectLS = p.Results.spgProjectLS;
             self.spgBbType = p.Results.spgBbType;
             self.spgMemory = p.Results.spgMemory;
+            
+            import utils.PrintInfo;
+            %             import linesearch.armijo;
         end % constructor
         
         function self = solve(self)
@@ -163,8 +152,20 @@ classdef PqnSolver < solvers.NlpSolver
             
             self.solveTime = tic;
             
+            printObj = utils.PrintInfo('Pqn');
+            
             if self.verbose >= 2
-                self.printHeaderFooter('header');
+                extra = containers.Map( ...
+                    {'suffDec', 'bbInit', 'corrections', 'hess', ...
+                    'adjustStep', 'spgTestOpt', 'spgVerbose', ...
+                    'spgUseSpectral', 'spgProjectLS', 'spgBbType', ...
+                    'spgMemory', 'maxProj'}, ...
+                    {self.suffDec, self.bbInit, self.corrections, ...
+                    self.hess, self.adjustStep, self.spgTestOpt, ...
+                    self.spgVerbose, self.spgUseSpectral, ...
+                    self.spgProjectLS, self.spgBbType, self.spgMemory, ...
+                    self.maxProj});
+                printObj.header(self, extra);
                 self.printf(self.LOG_FORMAT, self.LOG_HEADER{:});
             end
             
@@ -311,102 +312,19 @@ classdef PqnSolver < solvers.NlpSolver
             self.solved = ~(self.iStop == 7 || self.iStop == 8 || ...
                 self.iStop == 9);
             self.solveTime = toc(self.solveTime);
-            if self.verbose
-                self.printf('\nEXIT PQN: %s\nCONVERGENCE: %d\n', ...
-                    self.EXIT_MSG{self.iStop}, self.solved);
-                self.printf('||Pg|| = %8.1e\n', self.pgNorm);
-                self.printf('Stop tolerance = %8.1e\n', self.rOptTol);
-            end
-            if self.verbose >= 2
-                self.printHeaderFooter('footer');
-            end
+            
+            printObj.footer(self);
         end % solve
-        
-    end % public methods
-    
-    
-    methods (Access = private)
-        
-        function printHeaderFooter(self, msg)
-            switch msg
-                case 'header'
-                    % Print header
-                    self.printf('\n');
-                    self.printf('%s\n', ['*', repmat('-',1,58), '*']);
-                    self.printf([repmat('\t', 1, 3), 'MinConf_PQN \n']);
-                    self.printf('%s\n\n', ['*', repmat('-',1,58), '*']);
-                    self.printf(self.nlp.formatting())
-                    self.printf('\nParameters\n----------\n')
-                    self.printf('%-15s: %3s %8i', 'maxIter', '', ...
-                        self.maxIter);
-                    self.printf('\t%-15s: %3s %8.1e\n', ' aOptTol', '', ...
-                        self.aOptTol);
-                    self.printf('%-15s: %3s %8i', 'maxEval', '', ...
-                        self.maxEval);
-                    self.printf('\t%-15s: %3s %8.1e\n', ' progTol', '', ...
-                        self.aFeasTol);
-                    self.printf('%-15s: %3s %8i', 'maxProj', '', ...
-                        self.maxProj);
-                    self.printf('\t%-15s: %3s %8.1e\n', ' suffDec', '', ...
-                        self.suffDec);
-                    self.printf('%-15s: %3s %8d', 'bbInit', '', ...
-                        self.bbInit);
-                    self.printf('\t%-15s: %3s %8d\n', ' corrections', ...
-                        '', self.corrections);
-                    self.printf('%-15s: %3s %8s', 'hess', '', ...
-                        self.hess);
-                    self.printf('\t%-15s: %3s %8d\n', ' adjustStep', '', ...
-                        self.adjustStep);
-                    self.printf('\nSPG parameters\n--------------\n')
-                    self.printf('%-15s: %3s %8d', 'spgTestOpt', '', ...
-                        self.spgTestOpt);
-                    self.printf('\t%-15s: %3s %8d\n', ' spgVerbose', ...
-                        '', self.spgVerbose);
-                    self.printf('%-15s: %3s %8d', 'spgUseSpectral', '', ...
-                        self.spgUseSpectral);
-                    self.printf('\t%-15s: %3s %8d\n', ' spgProjectLS', ...
-                        '', self.spgProjectLS);
-                    self.printf('%-15s: %3s %8d', 'spgBbType', '', ...
-                        self.spgBbType);
-                    self.printf('\t%-15s: %3s %8d\n', ' spgMemory', '', ...
-                        self.spgMemory);
-                case 'footer'
-                    % Print footer
-                    self.printf('\n')
-                    self.printf(' %-27s  %6i     %-17s  %15.8e\n', ...
-                        'No. of iterations', self.iter, ...
-                        'Objective value', self.fx);
-                    t1 = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
-                    t2 = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
-                    self.printf(' %-27s  %6i     %-17s    %6i\n', ...
-                        'No. of calls to objective' , t1, ...
-                        'No. of calls to gradient', t2);
-                    self.printf(' %-27s  %6i \n', ...
-                        'No. of Hessian-vector prods', ...
-                        self.nlp.ncalls_hvp + self.nlp.ncalls_hes);
-                    self.printf('\n');
-                    tt = self.solveTime;
-                    t1 = self.nlp.time_fobj + self.nlp.time_fcon;
-                    t1t = round(100 * t1/tt);
-                    t2 = self.nlp.time_gobj + self.nlp.time_gcon;
-                    t2t = round(100 * t2/tt);
-                    self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
-                        '(%3d%%)\n'], 'Time: function evals' , t1, t1t, ...
-                        'gradient evals', t2, t2t);
-                    t1 = self.nlp.time_hvp + self.nlp.time_hes;
-                    t1t = round(100 * t1/tt);
-                    self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
-                        '(%3d%%)\n'], 'Time: Hessian-vec prods', t1, ...
-                        t1t, 'total solve', tt, 100);
-                otherwise
-                    error('Unrecognized case in printHeaderFooter');
-            end % switch
-        end % printHeaderFooter
         
         function printf(self, varargin)
             %% Printf - prints variables arguments to a file
             fprintf(self.fid, varargin{:});
         end
+        
+    end % public methods
+    
+    
+    methods (Access = private)
         
         function s = gpstep(self, x, g)
             %% GPStep - computing the projected gradient

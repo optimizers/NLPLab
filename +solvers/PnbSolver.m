@@ -6,6 +6,7 @@ classdef PnbSolver < solvers.NlpSolver
         maxIterLS; % Maximal number of iterations in the line search
         fid;
         lsFunc; % Line search function
+        exactLS;
     end
     
     properties (Hidden = true, Constant)
@@ -45,11 +46,12 @@ classdef PnbSolver < solvers.NlpSolver
             
             self.suffDec = p.Results.suffDec;
             self.maxIterLS = p.Results.maxIterLS;
+            self.exactLS = p.Results.exactLS;
             self.fid = p.Results.fid;
             
             % Exact line search is only implemented for quadratic or least
             % squares models
-            if p.Results.exactLS && ...
+            if self.exactLS && ...
                     (isa(self.nlp, 'model.LeastSquaresModel') || ...
                     isa(self.nlp, 'model.QpModel'))
                 self.lsFunc = @(xNew, f, x, g, d, H, working) ...
@@ -59,6 +61,9 @@ classdef PnbSolver < solvers.NlpSolver
                 self.lsFunc = @(xNew, f, x, g, d, H, working) ...
                     self.restrictedArmijo(xNew, f, x, g, d, H, working);
             end
+            
+            import utils.PrintInfo;
+%             import linesearch.redProjArmijo;
         end % constructor
         
         function self = solve(self)
@@ -68,9 +73,14 @@ classdef PnbSolver < solvers.NlpSolver
             self.iter = 1;
             self.iStop = 0;
             
+            printObj = utils.PrintInfo('Pnb');
+            
             % Output Log
             if self.verbose >= 2
-                self.printHeaderFooter('header');
+                extra = containers.Map( ... 
+                    {'suffDec', 'maxIterLS', 'exactLS'}, ...
+                    {self.suffDec, self.maxIterLS, self.exactLS});
+                printObj.header(self, extra);
                 self.printf(self.LOG_FORMAT, self.LOG_HEADER{:});
             end
             
@@ -99,8 +109,8 @@ classdef PnbSolver < solvers.NlpSolver
                 self.nObjFunc = self.nlp.ncalls_fobj + ...
                     self.nlp.ncalls_fcon;
                 if self.verbose >= 2
-                    fprintf(self.LOG_BODY, self.iter, self.nObjFunc, f, ...
-                        pgnrm, sum(working));
+                    self.printf(self.LOG_BODY, self.iter, ...
+                        self.nObjFunc, f, pgnrm, sum(working));
                 end
                 
                 % Checking various stopping conditions, exit if true
@@ -159,79 +169,18 @@ classdef PnbSolver < solvers.NlpSolver
             self.solveTime = toc(self.solveTime);
             self.solved = ~(self.iStop == 8 || self.iStop == 9);
             
-            if self.verbose
-                self.printf('\nEXIT PNB: %s\nCONVERGENCE: %d\n', ...
-                    self.EXIT_MSG{self.iStop}, self.solved);
-                self.printf('||Pg|| = %8.1e\n', self.pgNorm);
-                self.printf('Stop tolerance = %8.1e\n', self.rOptTol);
-            end
-            
-            if self.verbose >= 2
-                self.printHeaderFooter('footer');
-            end
+            printObj.footer(self);
         end % solve
-        
-    end % public methods
-    
-    
-    methods (Access = private)
-        
-        function printHeaderFooter(self, msg)
-            switch msg
-                case 'header'
-                    % Print header
-                    self.printf('\n');
-                    self.printf('%s\n', ['*', repmat('-',1,58), '*']);
-                    self.printf([repmat('\t', 1, 3), 'Pnb Solver \n']);
-                    self.printf('%s\n\n', ['*', repmat('-',1,58), '*']);
-                    self.printf(self.nlp.formatting())
-                    self.printf('\nParameters\n----------\n')
-                    self.printf('%-15s: %3s %8i', 'maxIter', '', ...
-                        self.maxIter);
-                    self.printf('\t%-15s: %3s %8.1e\n', ' optTol', '', ...
-                        self.aOptTol);
-                    self.printf('%-15s: %3s %8.1e', 'suffDec', '', ...
-                        self.suffDec);
-                    self.printf('\t%-15s: %3s %8d\n', ' maxIterLS', '', ...
-                        self.maxIterLS);
-                    self.printf('\n');
-                case 'footer'
-                    % Print footer
-                    self.printf('\n')
-                    self.printf(' %-27s  %6i     %-17s  %15.8e\n', ...
-                        'No. of iterations', self.iter, ...
-                        'Objective value', self.fx);
-                    t1 = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
-                    t2 = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
-                    self.printf(' %-27s  %6i     %-17s    %6i\n', ...
-                        'No. of calls to objective' , t1, ...
-                        'No. of calls to gradient', t2);
-                    self.printf(' %-27s  %6i \n', ...
-                        'No. of Hessian-vector prods', ...
-                        self.nlp.ncalls_hvp + self.nlp.ncalls_hes);
-                    self.printf('\n');
-                    tt = self.solveTime;
-                    t1 = self.nlp.time_fobj + self.nlp.time_fcon;
-                    t1t = round(100 * t1/tt);
-                    t2 = self.nlp.time_gobj + self.nlp.time_gcon;
-                    t2t = round(100 * t2/tt);
-                    self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
-                        '(%3d%%)\n'], 'Time: function evals' , t1, t1t, ...
-                        'gradient evals', t2, t2t);
-                    t1 = self.nlp.time_hvp + self.nlp.time_hes;
-                    t1t = round(100 * t1/tt);
-                    self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
-                        '(%3d%%)\n'], 'Time: Hessian-vec prods', t1, ...
-                        t1t, 'total solve', tt, 100);
-                otherwise
-                    error('Unrecognized case in printHeaderFooter');
-            end % switch
-        end % printHeaderFooter
         
         function printf(self, varargin)
             %% Printf - prints variables arguments to a file
             fprintf(self.fid, varargin{:});
         end
+        
+    end % public methods
+    
+    
+    methods (Access = private)
         
         function z = project(self, x)
             %% Project
@@ -269,7 +218,7 @@ classdef PnbSolver < solvers.NlpSolver
             
             % Compute a Newton direction from reduced g & H
             d = self.newtonDir(g(~gFixed), H(~gFixed, ~gFixed));
-
+            
             % We restrict x to the free variables
             x = x(~gFixed);
             

@@ -64,16 +64,6 @@ classdef TmpSolver < solvers.NlpSolver
     
     
     properties (SetAccess = private, Hidden = false)
-        % Norm of the projected gradient at x
-        pgNorm;
-        % Exit flag
-        iStop;
-    end % gettable private propertie
-    
-    properties (Access = private, Hidden = false)
-        % Internal parameters
-        verbose; % 0, 1 or 2
-        maxEval; % Maximum number of objective function evaluations
         suffDec;
         maxIterLS; % Maximal number of iterations during linesearch
         method; % How to compute the descent direction
@@ -123,8 +113,6 @@ classdef TmpSolver < solvers.NlpSolver
             p = inputParser;
             p.KeepUnmatched = true;
             p.PartialMatching = false;
-            p.addParameter('verbose', 2);
-            p.addParameter('maxEval', 5e2);
             p.addParameter('suffDec', 1e-4);
             p.addParameter('method', 'pcg');
             p.addParameter('corrections', 7);
@@ -136,7 +124,6 @@ classdef TmpSolver < solvers.NlpSolver
             
             self = self@solvers.NlpSolver(nlp, p.Unmatched);
             
-            self.verbose = p.Results.verbose;
             self.suffDec = p.Results.suffDec;
             self.maxIterLS = p.Results.maxIterLS;
             self.method = p.Results.method;
@@ -159,6 +146,9 @@ classdef TmpSolver < solvers.NlpSolver
             self.krylOpts.show = false;
             self.krylOpts.check = false;
             self.krylOpts.itnlim = max(1e4, self.nlp.n);
+            
+            import utils.PrintInfo;
+            import linesearch.armijo;
         end % constructor
         
         function self = solve(self)
@@ -173,9 +163,16 @@ classdef TmpSolver < solvers.NlpSolver
             self.iStop = 0;
             self.iter = 1;
             
+            printObj = utils.PrintInfo('Tmp');
+            
             % Output Log
             if self.verbose >= 2
-                self.printHeaderFooter('header');
+                extra = containers.Map( ...
+                    {'suffDec', 'method', 'corrections', 'damped', ...
+                    'maxIterLS'}, ...
+                    {self.suffDec, self.method, self.corrections, ...
+                    self.damped, self.maxIterLS});
+                printObj.header(self, extra);
                 self.printf(self.LOG_FORMAT, self.LOG_HEADER{:});
             end
             
@@ -214,7 +211,7 @@ classdef TmpSolver < solvers.NlpSolver
             % Relative stopping tolerance
             self.rOptTol = self.aOptTol * norm(g);
             self.rFeasTol = self.aFeasTol * abs(f);
-                        
+            
             % Compute working set (inactive constraints)
             working = self.working(x, g);
             
@@ -364,86 +361,18 @@ classdef TmpSolver < solvers.NlpSolver
             self.solveTime = toc(self.solveTime);
             self.solved = ~(self.iStop == 8 || self.iStop == 9);
             
-            if self.verbose
-                self.printf('\nEXIT TMP: %s\nCONVERGENCE: %d\n', ...
-                    self.EXIT_MSG{self.iStop}, self.solved);
-                self.printf('||Pg|| = %8.1e\n', self.pgNorm);
-                self.printf('Stop tolerance = %8.1e\n', self.rOptTol);
-            end
-            
-            if self.verbose >= 2
-                self.printHeaderFooter('footer');
-            end
+            printObj.footer(self);
         end % solve
-        
-    end % public methods
-    
-    
-    methods (Access = private)
-        
-        function printHeaderFooter(self, msg)
-            switch msg
-                case 'header'
-                    % Print header
-                    self.printf('\n');
-                    self.printf('%s\n', ['*', repmat('-',1,58), '*']);
-                    self.printf([repmat('\t', 1, 3), 'MinConf_TMP \n']);
-                    self.printf('%s\n\n', ['*', repmat('-',1,58), '*']);
-                    self.printf(self.nlp.formatting())
-                    self.printf('\nParameters\n----------\n')
-                    self.printf('%-15s: %3s %8i', 'maxIter', '', ...
-                        self.maxIter);
-                    
-                    self.printf('\t%-15s: %3s %8.1e\n', ' aOptTol', '', ...
-                        self.aOptTol);
-                    self.printf('%-15s: %3s %8.1e', 'suffDec', '', ...
-                        self.suffDec);
-                    self.printf('\t%-15s: %3s %8d\n', ' maxIterLS', '', ...
-                        self.maxIterLS);
-                    self.printf('%-15s: %3s %8s', 'method', '', ...
-                        self.method);
-                    self.printf('\t%-15s: %3s %8d\n', ' corrections', ...
-                        '', self.corrections);
-                    self.printf('%-15s: %3s %8d', 'damped', '', ...
-                        self.damped);
-                    self.printf('\n');
-                case 'footer'
-                    % Print footer
-                    self.printf('\n')
-                    self.printf(' %-27s  %6i     %-17s  %15.8e\n', ...
-                        'No. of iterations', self.iter, ...
-                        'Objective value', self.fx);
-                    t1 = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
-                    t2 = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
-                    self.printf(' %-27s  %6i     %-17s    %6i\n', ...
-                        'No. of calls to objective' , t1, ...
-                        'No. of calls to gradient', t2);
-                    self.printf(' %-27s  %6i \n', ...
-                        'No. of Hessian-vector prods', ...
-                        self.nlp.ncalls_hvp + self.nlp.ncalls_hes);
-                    self.printf('\n');
-                    tt = self.solveTime;
-                    t1 = self.nlp.time_fobj + self.nlp.time_fcon;
-                    t1t = round(100 * t1/tt);
-                    t2 = self.nlp.time_gobj + self.nlp.time_gcon;
-                    t2t = round(100 * t2/tt);
-                    self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
-                        '(%3d%%)\n'], 'Time: function evals' , t1, t1t, ...
-                        'gradient evals', t2, t2t);
-                    t1 = self.nlp.time_hvp + self.nlp.time_hes;
-                    t1t = round(100 * t1/tt);
-                    self.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
-                        '(%3d%%)\n'], 'Time: Hessian-vec prods', t1, ...
-                        t1t, 'total solve', tt, 100);
-                otherwise
-                    error('Unrecognized case in printHeaderFooter');
-            end % switch
-        end % printHeaderFooter
         
         function printf(self, varargin)
             %% Printf - prints variables arguments to a file
             fprintf(self.fid, varargin{:});
         end
+        
+    end % public methods
+    
+    
+    methods (Access = private)
         
         function x = project(self, x)
             %% Project - project x on the bounds
@@ -467,17 +396,11 @@ classdef TmpSolver < solvers.NlpSolver
             failed = false;
             % Check if decrease is sufficient
             while fNew > f + self.suffDec * g' * (xNew - x)
-                if self.verbose == 2
-                    fprintf('Halving Step Size\n');
-                end
                 t = 0.5 * t;
                 
                 % Check whether step has become too small
                 if (sum(abs(t * d)) < self.aOptTol * norm(d)) || ...
                         (iterLS > self.maxIterLS)
-                    if self.verbose == 3
-                        fprintf('Line Search failed\n');
-                    end
                     % Return original x, f and g values
                     t = 0;
                     xNew = x;
@@ -568,10 +491,6 @@ classdef TmpSolver < solvers.NlpSolver
             if ys > 1e-10
                 % If curvature condition is met, update hessian approx
                 B = B + (y*y') / (y'*s) - (B*s*(s'*B)) / (s'*B*s);
-            else
-                if self.verbose == 2
-                    fprintf('Skipping Update\n');
-                end
             end
             
             % Updating descent direction
@@ -600,9 +519,6 @@ classdef TmpSolver < solvers.NlpSolver
                 d(working) = -R \ (R' \ g(working));
             else
                 % If not, add smallest eigen value to the diagonal
-                if self.verbose == 2
-                    fprintf('Adjusting Hessian\n');
-                end
                 H(working, working) = H(working, working) + ...
                     speye(sum(working)) * max(0, 1e-12 - ...
                     min(real(eig(H(working, working)))));
