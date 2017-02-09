@@ -60,6 +60,8 @@ classdef PqnSolver < solvers.NlpSolver
         spgProjectLS; % Do a projected linesearch
         spgBbType; % Use Barzilai-Borwein step correction
         spgMemory; % # previous vals to consider in non-monotone linesearch
+        
+        stats;
     end % private properties
     
     properties (Hidden = true, Constant)
