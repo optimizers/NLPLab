@@ -78,20 +78,6 @@ classdef TmpSolver < solvers.NlpSolver
             'Function Val', '||Pg||', 'g''*d'};
         LOG_FORMAT = '%10s %10s %15s %15s %15s %15s\n';
         LOG_BODY = '%10d %10d %15.5e %15.5e %15.5e %15.5e\n';
-        EXIT_MSG = { ...
-            ['All variables are at their bound and no further', ...
-            ' progress is possible at initial point\n'], ...            % 1
-            ['All working variables satisfy optimality condition at', ...
-            ' initial point\n'], ...                                    % 2
-            'Directional derivative below aOptTol\n', ...                % 3
-            ['All variables are at their bound and no further', ...
-            ' progress is possible\n'], ...                             % 4
-            'All working variables satisfy optimality condition\n', ... % 5
-            'Step size below aOptTol\n', ...                             % 6
-            'Function value changing by less than aOptTol\n', ...        % 7
-            'Function Evaluations exceeds maxEval\n', ...              % 8
-            'Maximum number of iterations reached\n'                    % 9
-            };
     end % constant properties
     
     
@@ -160,7 +146,7 @@ classdef TmpSolver < solvers.NlpSolver
             self.solveTime = tic;
             
             % Setting counters and exit flag, will exit if not 0
-            self.iStop = 0;
+            self.iStop = self.EXIT_NONE;
             self.iter = 1;
             
             printObj = utils.PrintInfo('Tmp');
@@ -218,13 +204,13 @@ classdef TmpSolver < solvers.NlpSolver
             % Early optimality check - if true won't enter loop
             pgnrm = norm(g(working));
             if isempty(working)
-                self.iStop = 1;
+                self.iStop = self.EXIT_ALL_BOUND;
             elseif pgnrm <= self.rOptTol + self.aOptTol
-                self.iStop = 2;
+                self.iStop = self.EXIT_OPT_TOL;
             end
             
             %% Main loop
-            while self.iStop == 0
+            while ~self.iStop % self.iStop == 0
                 % Compute step direction
                 d = zeros(self.nlp.n, 1);
                 switch self.method
@@ -280,7 +266,7 @@ classdef TmpSolver < solvers.NlpSolver
                 % Check that progress can be made along the direction
                 gtd = g' * d;
                 if gtd > -self.aOptTol * norm(g) * norm(d) - self.aOptTol
-                    self.iStop = 3;
+                    self.iStop = self.EXIT_DIR_DERIV;
                     % Leave now
                     break;
                 end
@@ -327,22 +313,24 @@ classdef TmpSolver < solvers.NlpSolver
                 
                 % Checking various stopping conditions, exit if true
                 if isempty(working)
-                    self.iStop = 4;
+                    self.iStop = self.EXIT_ALL_BOUND;
                 elseif pgnrm <= self.rOptTol + self.aOptTol
-                    self.iStop = 5;
+                    self.iStop = self.EXIT_OPT_TOL;
                     % Check for lack of progress
                 elseif sum(abs(t * d)) < self.aOptTol * norm(d) + ...
                         self.aOptTol
-                    self.iStop = 6;
+                    self.iStop = self.EXIT_DIR_DERIV;
                 elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
-                    self.iStop = 7;
+                    self.iStop = self.EXIT_FEAS_TOL;
                 elseif self.nObjFunc > self.maxEval
-                    self.iStop = 8;
+                    self.iStop = self.EXIT_MAX_EVAL;
                 elseif self.iter >= self.maxIter
-                    self.iStop = 9;
+                    self.iStop = self.EXIT_MAX_ITER;
+                elseif toc(self.solveTime) >= self.maxRT
+                    self.iStop = self.EXIT_MAX_RT;
                 end
                 
-                if self.iStop ~= 0
+                if self.iStop % self.iStop ~= 0
                     break;
                 end
                 
@@ -359,7 +347,8 @@ classdef TmpSolver < solvers.NlpSolver
             
             %% End of solve
             self.solveTime = toc(self.solveTime);
-            self.solved = ~(self.iStop == 8 || self.iStop == 9);
+            % Set solved attribute
+            self.isSolved();
             
             printObj.footer(self);
         end % solve

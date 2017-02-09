@@ -23,10 +23,10 @@ classdef PrintInfo < handle
                     solver.solved);
                 solver.printf('||Pg|| = %8.1e\n', solver.pgNorm);
                 solver.printf('Stop tolerance = %8.1e\n', solver.rOptTol);
+                solver.printf('\n')
             end
             
             if solver.verbose >= 2
-                solver.printf('\n')
                 solver.printf(' %-27s  %6i     %-17s  %15.8e\n', ...
                     'No. of iterations', solver.iter, ...
                     'Objective value', solver.fx);
@@ -52,8 +52,8 @@ classdef PrintInfo < handle
                 solver.printf([' %-24s %6.2f (%3d%%)  %-20s %6.2f', ...
                     '(%3d%%)\n'], 'Time: Hessian-vec prods', t1, ...
                     t1t, 'total solve', tt, 100);
+                solver.printf('\n');
             end
-            solver.printf('\n');
         end % printHeaderFooter
         
         function header(self, solver, map)
@@ -84,12 +84,20 @@ classdef PrintInfo < handle
                 ind = 1;
                 for key = map.keys
                     if mod(ind, 2) ~= 0
-                        solver.printf('%-15s: %3s %8.1e', key{1}, '', ...
-                            map(key{1}));
+                        if ischar(map(key{1}))
+                            format = '%-15s: %3s %8s';
+                        else
+                            format = '%-15s: %3s %8.1e';
+                        end
                     else
-                        solver.printf('\t%-15s: %3s %8.1e\n', key{1}, '', ...
-                            map(key{1}));
+                        if ischar(map(key{1}))
+                            format = '\t%-15s: %3s %8s\n';
+                        else
+                            format = '\t%-15s: %3s %8.1e\n';
+                        end
                     end
+                    solver.printf(format, key{1}, '', ...
+                        map(key{1}));
                     ind = ind + 1;
                 end
             end

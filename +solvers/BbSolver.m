@@ -20,15 +20,6 @@ classdef BbSolver < solvers.NlpSolver
             'Function Val', '||Pg||'};
         LOG_FORMAT = '%10s %10s %10s %15s %15s %15s\n';
         LOG_BODY = '%10d %10d %10d %15.5e %15.5e %15.5e\n';
-        EXIT_MSG = { ...
-            'First-Order Optimality Conditions Below optTol\n', ...     % 1
-            'Function value changing by less than feasTol\n', ...       % 2
-            'Function Evaluations exceeds maxEval\n', ...               % 3
-            'Maximum number of iterations reached\n', ...               % 4
-            'Maximum number of projections reached\n', ...              % 5
-            'Maximum number of iterations in line search reached\n', ...% 6
-            };
-        
         ALPH_MIN = 1e-3;
         ALPH_MAX = 1e3;
         SIG_1 = 0.1;
@@ -95,11 +86,11 @@ classdef BbSolver < solvers.NlpSolver
                     {'suffDec', 'maxIterLS', 'memory'}, ...
                     {self.suffDec, self.maxIterLS, self.memory});
                 printObj.header(self, extra);
-                self.printf(self.LOG_FORMAT, self.LOG_HEADER{:});
+                fprintf(self.LOG_FORMAT, self.LOG_HEADER{:});
             end
             
             % Exit flag set to 0, will exit if not 0
-            self.iStop = 0;
+            self.iStop = self.EXIT_NONE;
             % Resetting the counters
             self.nProj = 0;
             self.iter = 1;
@@ -109,15 +100,45 @@ classdef BbSolver < solvers.NlpSolver
             % Evaluate initial point & derivative
             [f, g] = self.nlp.obj(x);
             
+            fOld = inf;
+            
             % Relative stopping tolerance
             self.rOptTol = self.aOptTol * norm(g);
             self.rFeasTol = self.aFeasTol * abs(f);
             
             % Initial descent direction is the steepest descent
             alph = 1;
-            
+            t = 0;
             %% Main loop
-            while self.iStop == 0
+            while ~self.iStop % self.iStop == 0
+                
+                % Printing log
+                pgnrm = norm(self.project(x - g) - x);
+                if self.verbose >= 2
+                    self.nObjFunc = self.nlp.ncalls_fobj + ...
+                        self.nlp.ncalls_fcon;
+                    self.printf(self.LOG_BODY, self.iter, ...
+                        self.nObjFunc, self.nProj, t, f, pgnrm);
+                end
+                
+                % Checking stopping conditions
+                if pgnrm < self.rOptTol + self.aOptTol
+                    self.iStop = self.EXIT_OPT_TOL;
+                elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
+                    self.iStop = self.EXIT_FEAS_TOL;
+                elseif self.nObjFunc > self.maxEval
+                    self.iStop = self.EXIT_MAX_EVAL;
+                elseif self.iter >= self.maxIter
+                    self.iStop = self.EXIT_MAX_ITER;
+                elseif self.nProj >= self.maxProj
+                    self.iStop = self.EXIT_MAX_PROJ;
+                elseif toc(self.solveTime) >= self.maxRT
+                    self.iStop = self.EXIT_MAX_RT;
+                end
+                
+                if self.iStop % self.iStop ~= 0
+                    break;
+                end
                 
                 % Descent direction
                 d = self.project(x - alph * g) - x;
@@ -129,14 +150,14 @@ classdef BbSolver < solvers.NlpSolver
                 gOld = g;
                 
                 % Update stored objective function values
-                self.storedObjFunc( ... 
+                self.storedObjFunc( ...
                     mod(self.iter - 1, self.memory) + 1) = f;
                 
                 % Perform a non-monotone Armijo line search
                 [x, f, failed, t] = linesearch.nmSpectralArmijo(self, ...
                     x, f, g, d);
                 if failed
-                    self.iStop = 6;
+                    self.iStop = self.EXIT_MAX_ITER_LS;
                     pgnrm = norm(self.project(x - g) - x);
                     break;
                 end
@@ -146,32 +167,6 @@ classdef BbSolver < solvers.NlpSolver
                 
                 % Compute new step length according to BB rule
                 alph = self.bbStepLength(xOld, x, gOld, g);
-                
-                % Output log
-                pgnrm = norm(self.project(x - g) - x);
-                if self.verbose >= 2
-                    self.nObjFunc = self.nlp.ncalls_fobj + ...
-                        self.nlp.ncalls_fcon;
-                    self.printf(self.LOG_BODY, self.iter, ...
-                        self.nObjFunc, self.nProj, t, f, pgnrm);
-                end
-                
-                % Checking stopping conditions
-                if pgnrm < self.rOptTol + self.aOptTol
-                    self.iStop = 1;
-                elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
-                    self.iStop = 2;
-                elseif self.nObjFunc > self.maxEval
-                    self.iStop = 3;
-                elseif self.iter >= self.maxIter
-                    self.iStop = 4;
-                elseif self.nProj >= self.maxProj
-                    self.iStop = 5;
-                end
-                
-                if self.iStop ~= 0
-                    break;
-                end
                 
                 self.iter = self.iter + 1;
             end % main loop
@@ -185,8 +180,9 @@ classdef BbSolver < solvers.NlpSolver
             self.nHess = self.nlp.ncalls_hvp + self.nlp.ncalls_hes;
             
             %% End of solve
-            self.solved = ~(self.iStop == 6 || self.iStop == 7);
             self.solveTime = toc(self.solveTime);
+            % Set solved attribute
+            self.isSolved();
             
             printObj.footer(self);
         end % solve
@@ -204,6 +200,10 @@ classdef BbSolver < solvers.NlpSolver
         function z = project(self, x)
             %% Project - projecting x on the constraint set
             z = self.nlp.project(x);
+            if ~self.nlp.solved
+                % Propagate throughout the program to exit
+                self.iStop = self.EXIT_PROJ_FAILURE;
+            end
             self.nProj = self.nProj + 1;
         end
         

@@ -28,6 +28,7 @@ classdef ProjModel < model.LeastSquaresModel
         AAt;
         normJac;
         xbar;
+        solved = true;
     end
     
     
@@ -82,7 +83,7 @@ classdef ProjModel < model.LeastSquaresModel
             self.A = opFunction(objSiz, objSiz, ...
                 @(z, mode) self.precMult(z, mode));
             self.AAt = opFunction(objSiz, objSiz, ...
-                @(z, mode) self.hobj(z));
+                @(z, mode) self.hobjprod([], [], z));
             % Getting the norm of the preconditionner, helps to evaluate
             % "relative" decreases/zeros.
             self.normJac = self.prec.norm();
@@ -127,7 +128,7 @@ classdef ProjModel < model.LeastSquaresModel
         
         %% This method doesn't correspond to the same problem
         % Solves the projection { x | C*x = 0 } for the primal variable
-        function wProj = eqProject(self, d, fixed)
+        function wProj = eqProject(self, d, fixed, tol, iterMax)
             %% EqProject - project vector d on equality constraints
             % Solves the problem
             % min   1/2 || w - d||^2
@@ -156,9 +157,9 @@ classdef ProjModel < model.LeastSquaresModel
             % B := {b_i' = ith col of I for all i \in ~working}
             % Building reduced operators from object's attributes
             subA = self.A(fixed, :); % B * C
-            subAAt = self.AAt(fixed, :);
+            subAAt = self.AAt(fixed, fixed);
             % Using CG to solve (B*C*C'*B') z = -B*C*d
-            [z, ~] = pcg(subAAt', subA*(-d), 1e-12, 1e4);
+            [z, ~] = pcg(subAAt', subA*(-d), tol, iterMax);
             % For the unconstrained case, the solution is trivial
             wProj = d + (subA' * z);
         end
