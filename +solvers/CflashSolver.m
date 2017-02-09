@@ -26,18 +26,20 @@ classdef CflashSolver < solvers.NlpSolver
     
     
     properties (SetAccess = private, Hidden = false)
-        maxCgIter      % maximum number of CG iterations per Newton step
-        nSuccessIter = 0 % number of successful iterations
-        cgIter = 0    % total number of CG iterations
-        gNorm0         % norm of the gradient at x0
-        exitMsg       % string indicating exit
-        eqTol          % Tolerance for equalities (see indFree)
-        nProj;         % # of projections
-        maxProj;       % maximal # of projections
-        mu0            % sufficient decrease parameter
-        cgTol
-        fMin
-        fid            % File ID of where to direct log output
+        maxCgIter; % maximum number of CG iterations per Newton step
+        nSuccessIter = 0; % number of successful iterations
+        cgIter = 0; % total number of CG iterations
+        gNorm0; % norm of the gradient at x0
+        exitMsg; % string indicating exit
+        eqTol; % Tolerance for equalities (see indFree)
+        nProj; % # of projections
+        maxProj; % maximal # of projections
+        mu0; % sufficient decrease parameter
+        cgTol;
+        fMin;
+        fid; % File ID of where to direct log output
+        
+        stats;
     end
     
     properties (Hidden = true, Constant)

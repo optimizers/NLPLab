@@ -12,6 +12,8 @@ classdef BbSolver < solvers.NlpSolver
         storedObjFunc;
         suffDec;
         maxProj;
+        
+        stats;
     end % private properties
     
     properties (Hidden = true, Constant)
@@ -70,6 +72,20 @@ classdef BbSolver < solvers.NlpSolver
             
             import utils.PrintInfo;
             import linesearch.nmSpectralArmijo;
+            
+            self.stats.proj = struct;
+            self.stats.proj.info = [];
+            self.stats.proj.infoHeader = ...
+                {'nProj', 'iter', 'nObjFunc', 'nGrad', 'nHess', ...
+                'pgNorm', 'solveTime'};
+            self.stats.proj.exit = {};
+                
+            self.stats.rec = struct;
+            self.stats.rec.info = [];
+            self.stats.rec.infoHeader = ...
+                {'iter', 'nObjFunc', 'nGrad', 'nHess', 'nProj', ...
+                'pgNorm', 'solveTime'};
+            self.stats.rec.exit = {};
         end % constructor
         
         function self = solve(self)
@@ -114,12 +130,21 @@ classdef BbSolver < solvers.NlpSolver
                 
                 % Printing log
                 pgnrm = norm(self.project(x - g) - x);
+                
+                self.nObjFunc = self.nlp.ncalls_fobj + ...
+                    self.nlp.ncalls_fcon;
+                self.nGrad = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
+                self.nHess = self.nlp.ncalls_hvp + self.nlp.ncalls_hes;
+                
+                
                 if self.verbose >= 2
-                    self.nObjFunc = self.nlp.ncalls_fobj + ...
-                        self.nlp.ncalls_fcon;
                     self.printf(self.LOG_BODY, self.iter, ...
                         self.nObjFunc, self.nProj, t, f, pgnrm);
                 end
+                
+                self.stats.rec.info = [self.stats.rec.info; ...
+                    [self.iter, self.nObjFunc, self.nGrad, self.nHess, ...
+                    self.nProj, pgnrm, toc(self.solveTime)]];
                 
                 % Checking stopping conditions
                 if pgnrm < self.rOptTol + self.aOptTol
@@ -185,6 +210,8 @@ classdef BbSolver < solvers.NlpSolver
             self.isSolved();
             
             printObj.footer(self);
+            
+            self.stats.rec.exit{end + 1} = self.EXIT_MSG{self.iStop};
         end % solve
         
         function printf(self, varargin)
@@ -204,6 +231,19 @@ classdef BbSolver < solvers.NlpSolver
                 % Propagate throughout the program to exit
                 self.iStop = self.EXIT_PROJ_FAILURE;
             end
+            
+            % This can be removed later
+            if isprop(self.nlp, 'projSolver')
+                solver = self.nlp.projSolver;
+                % Collecting statistics
+                self.stats.proj.info = [self.stats.proj.info; ...
+                    [self.nProj, solver.iter, solver.nObjFunc, ...
+                    solver.nGrad, solver.nHess, solver.pgNorm, ...
+                    solver.solveTime]];
+                self.stats.proj.exit{end + 1} = ...
+                    solver.EXIT_MSG{solver.iStop};
+            end
+            
             self.nProj = self.nProj + 1;
         end
         
