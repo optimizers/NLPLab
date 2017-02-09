@@ -8,6 +8,9 @@ classdef LinIneqProj < handle
     %
     %   min_x { 1/2 || z - x ||^2 : cL <= C * z <= cU }
     
+    properties (SetAccess = private)
+       solved = true; 
+    end
     
     properties (Constant, Hidden = false)
         % MATLAB's lsqlin parameters

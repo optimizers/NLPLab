@@ -11,21 +11,20 @@ classdef ShiftedQpModel < model.NlpModel
     
     
     %% Properties
-    properties (Access = private, Hidden = false)
+    properties (SetAccess = private, Hidden = false)
         x; % Shift vector
         c;
         Q; % Hessian
         
-        % Projection function coming from the external NlpModel that this
-        % model approximates
-        projFun;
+        nlpProj;
+        solved;
     end
     
     
     %% Public methods
     methods (Access = public)
         
-        function self = ShiftedQpModel(name, x0, x, c, Q, projFun)
+        function self = ShiftedQpModel(name, x0, x, c, Q, nlpProj)
             m = length(x0);
             m2 = length(x);
             if isempty(x0) || isempty(x)
@@ -47,7 +46,7 @@ classdef ShiftedQpModel < model.NlpModel
             self.c = c;
             self.Q = opFunction(m, m, @(v, mode) Q(v));
             % Keep handle on the projection function
-            self.projFun = projFun;
+            self.nlpProj = nlpProj;
         end
         
         function [fObj, grad, hess] = obj(self, p)
@@ -68,7 +67,8 @@ classdef ShiftedQpModel < model.NlpModel
         function z = project(self, p)
             %% Project
             % Pass the input argument to the projection function handle
-            z = self.projFun(p);
+            z = self.nlpProj.project(p);
+            self.solved = self.nlpProj.solved;
         end
         
         function f = fobj_local(self, p)

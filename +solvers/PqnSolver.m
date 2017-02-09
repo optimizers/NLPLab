@@ -63,18 +63,6 @@ classdef PqnSolver < solvers.NlpSolver
     end % private properties
     
     properties (Hidden = true, Constant)
-        EXIT_MSG = { ...
-            ['First-Order Optimality Conditions Below aOptTol at', ...
-            ' Initial Point\n'], ...                                    % 1
-            'Directional Derivative below feasTol\n', ...               % 2
-            'First-Order Optimality Conditions Below aOptTol\n', ...    % 3
-            'Step size below progTol\n', ...                            % 4
-            'Function value changing by less than feasTol\n', ...       % 5
-            'Function Evaluations exceeds maxIter\n', ...               % 6
-            'Number of projections exceeds maxProject\n', ...           % 7
-            'Maximal number of iterations reached\n', ...               % 8
-            'Maximal number of line search iterations reached\n', ...   % 9
-            };
         LOG_HEADER = {'Iteration', 'Inner Iter', 'FunEvals', ...
             'Projections', 'Step Length', 'Function Val', 'Opt Cond', ...
             'gtd/|g|*|d|'};
@@ -113,14 +101,14 @@ classdef PqnSolver < solvers.NlpSolver
             p.addParameter('bbInit', 0);
             p.addParameter('hess', 'lbfgs');
             p.addParameter('fid', 1);
-            p.addParameter('maxIterLS', 50); % Max iters for linesearch
+            p.addParameter('maxIterLS', 30); % Max iters for linesearch
             % SPG sub-problem parameters
             p.addParameter('spgTestOpt', 1);
             p.addParameter('spgVerbose', 0);
             p.addParameter('spgUseSpectral', 1);
-            p.addParameter('spgProjectLS', 1);
+            p.addParameter('spgProjectLS', 0);
             p.addParameter('spgBbType', 1);
-            p.addParameter('spgMemory', 10);
+            p.addParameter('spgMemory', 1);
             
             p.parse(varargin{:});
             
@@ -175,7 +163,7 @@ classdef PqnSolver < solvers.NlpSolver
             self.spgIter = 0;
             
             % Exit flag set to 0, will exit if not 0
-            self.iStop = 0;
+            self.iStop = self.EXIT_NONE;
             % Project initial parameter vector
             x = self.project(self.nlp.x0);
             
@@ -198,7 +186,7 @@ classdef PqnSolver < solvers.NlpSolver
             end
             
             %% Main loop
-            while self.iStop == 0
+            while ~self.iStop % self.iStop == 0
                 % Compute Step Direction
                 if self.iter == 1
                     p = self.project(x - g);
@@ -254,7 +242,7 @@ classdef PqnSolver < solvers.NlpSolver
                 % We will use normgtd in the log later
                 if gtd > -self.aFeasTol * norm(g) * norm(d) - self.aFeasTol
                     % d might be null
-                    self.iStop = 2;
+                    self.iStop = self.EXIT_DIR_DERIV;
                     % Leaving now saves some processing
                     break;
                 end
@@ -282,22 +270,26 @@ classdef PqnSolver < solvers.NlpSolver
                 
                 % Check optimality conditions
                 if pgnrm < self.rOptTol + self.aOptTol
-                    self.iStop = 3;
+                    self.iStop = self.EXIT_OPT_TOL;
                 elseif max(abs(t * d)) < self.aFeasTol * norm(d) + ...
                         self.aFeasTol
-                    self.iStop = 4;
+                    self.iStop = self.EXIT_DIR_DERIV;
                 elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
-                    self.iStop = 5;
+                    self.iStop = self.EXIT_FEAS_TOL;
                 elseif self.nObjFunc > self.maxEval
-                    self.iStop = 6;
+                    self.iStop = self.EXIT_MAX_EVAL;
                 elseif self.nProj > self.maxProj
-                    self.iStop = 7;
+                    self.iStop = self.EXIT_MAX_PROJ;
                 elseif self.iter >= self.maxIter
-                    self.iStop = 8;
+                    self.iStop = self.EXIT_MAX_ITER;
+                elseif toc(self.solveTime) >= self.maxRT
+                    self.iStop = self.EXIT_MAX_RT;
                 end
-                if self.iStop ~= 0
+                
+                if self.iStop % self.iStop ~= 0
                     break;
                 end
+                
                 self.iter = self.iter + 1;
             end % main loop
             self.x = x;
@@ -309,9 +301,9 @@ classdef PqnSolver < solvers.NlpSolver
             self.nHess = self.nlp.ncalls_hvp + self.nlp.ncalls_hes;
             
             %% End of solve
-            self.solved = ~(self.iStop == 7 || self.iStop == 8 || ...
-                self.iStop == 9);
             self.solveTime = toc(self.solveTime);
+            % Set solved attribute
+            self.isSolved();
             
             printObj.footer(self);
         end % solve
@@ -340,6 +332,10 @@ classdef PqnSolver < solvers.NlpSolver
         function z = project(self, x)
             %% Project - projecting x on the constraint set
             z = self.nlp.project(x);
+            if ~self.nlp.solved
+                % Propagate throughout the program to exit
+                self.iStop = self.EXIT_PROJ_FAILURE;
+            end
             self.nProj = self.nProj + 1;
         end
         
@@ -371,11 +367,16 @@ classdef PqnSolver < solvers.NlpSolver
             SpgOptions.bbType = self.spgBbType;
             SpgOptions.memory = self.spgMemory;
             SpgOptions.maxIter = self.maxIter;
+            % Monotone linesearch
+            SpgOptions.memory = 1;
+            % Iterations left
+            SpgOptions.maxIter = self.maxIter - self.iter;
+            % Time left
+            SpgOptions.maxRT = self.maxRT - toc(self.solveTime);
             
             % Building a quadratic approximation
             import model.ShiftedQpModel;
-            quadModel = model.ShiftedQpModel('', xInit, x, g, H, ...
-                @(p) self.nlp.project(p));
+            quadModel = model.ShiftedQpModel('', xInit, x, g, H, self.nlp);
             
             % Solving using MinConf_SPG
             import solvers.SpgSolver
@@ -383,11 +384,13 @@ classdef PqnSolver < solvers.NlpSolver
             subProblem = subProblem.solve();
             
             if ~subProblem.solved
-                error('SpgSolver exited without ''pseudo''-convergence');
+                % SpgSolver exited without 'pseudo'-convergence
+                self.iStop = self.EXIT_INNER_FAIL;
             end
             
             % Retrieving solution, number of proj calls & inner iterations
             self.spgIter = subProblem.iter;
+            self.iter = self.iter + self.spgIter;
             self.nProj = self.nProj + subProblem.nProj;
             p = subProblem.x;
         end % solveSubProblem
@@ -418,15 +421,12 @@ classdef PqnSolver < solvers.NlpSolver
                     return
                     % Check whether step has become too small
                 elseif sum(abs(t * d)) < self.aFeasTol * norm(d) || ...
-                        t == 0 || iterLS >= self.maxIterLS
-                    if self.verbose == 2
-                        fprintf('Line Search failed\n');
-                    end
-                    self.iStop = 9;
+                        t == 0
+                    self.iStop = self.EXIT_STEP_SIZE;
                     return;
-                end
-                if self.verbose == 2
-                    fprintf('Halving Step Size\n');
+                elseif iterLS >= self.maxIterLS
+                    self.iStop = self.EXIT_MAX_ITER_LS;
+                    return;
                 end
                 t = t/2;
                 iterLS = iterLS + 1;

@@ -21,14 +21,6 @@ classdef PnBcgSolver < solvers.NlpSolver
             '||Pg||'};
         LOG_FORMAT = '%10s %10s %10s %15s %15s \n';
         LOG_BODY = '%10d %10d %10d %15.5e %15.5e\n';
-        EXIT_MSG = { ...
-            'All working variables satisfy optimality condition\n', ... % 1
-            'Function value changing by less than funcTol\n', ...       % 2
-            'Function Evaluations exceeds maxEval\n', ...               % 3
-            'Maximum number of iterations reached\n', ...               % 4
-            'Maximum number of iterations in line search reached\n', ...% 5
-            'Projected CG exit without convergence\n', ...              % 6
-            };
     end % constant properties
     
     
@@ -64,7 +56,7 @@ classdef PnBcgSolver < solvers.NlpSolver
             %% Solve using the Projected Newton for bounds algorithm
             self.solveTime = tic;
             self.iter = 1;
-            self.iStop = 0;
+            self.iStop = self.EXIT_NONE;
             self.cgIter = 0;
             
             printObj = utils.PrintInfo('PnBcg');
@@ -78,7 +70,7 @@ classdef PnBcgSolver < solvers.NlpSolver
             end
             
             % Project x0 to make sure it is a feasible point
-            x = self.nlp.project(self.nlp.x0);
+            x = self.project(self.nlp.x0);
             
             % Getting obj. func, gradient and hessian at x
             [f, g, H] = self.nlp.obj(x);
@@ -90,10 +82,10 @@ classdef PnBcgSolver < solvers.NlpSolver
             self.rFeasTol = self.aFeasTol * abs(f);
             
             %% Main loop
-            while self.iStop == 0
+            while ~self.iStop % self.iStop == 0
                 
                 % Stopping criteria is the norm of the 'working' gradient
-                pgnrm = norm(self.nlp.project(x - g) - x);
+                pgnrm = norm(self.project(x - g) - x);
                 
                 % Output log
                 self.nObjFunc = self.nlp.ncalls_fobj + ...
@@ -105,23 +97,25 @@ classdef PnBcgSolver < solvers.NlpSolver
                 
                 % Checking various stopping conditions, exit if true
                 if pgnrm < self.rOptTol + self.aOptTol
-                    self.iStop = 1;
+                    self.iStop = self.EXIT_OPT_TOL;
                 elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
-                    self.iStop = 2;
+                    self.iStop = self.EXIT_FEAS_TOL;
                 elseif self.nObjFunc >= self.maxEval
-                    self.iStop = 3;
+                    self.iStop = self.EXIT_MAX_EVAL;
                 elseif self.iter >= self.maxIter
-                    self.iStop = 4;
+                    self.iStop = self.EXIT_MAX_ITER;
+                elseif toc(self.solveTime) >= self.maxRT;
+                    self.iStop = self.EXIT_MAX_RT;
                 end
                 
-                if self.iStop ~= 0
+                if self.iStop % self.iStop ~= 0
                     break
                 end
                 
                 % Compute descent direction
                 [xs, failed] = self.BCCG(-g, H);
                 if failed
-                    self.iStop = 6;
+                    self.iStop = self.EXIT_INNER_FAIL;
                     break;
                 end
                 d = xs - x;
@@ -129,8 +123,8 @@ classdef PnBcgSolver < solvers.NlpSolver
                 % Compute Armijo line search
                 [x, ~, failed] = linesearch.armijo(self, x, f, g, d);
                 if failed
-                   self.iStop = 5;
-                   break;
+                    self.iStop = self.EXIT_MAX_ITER_LS;
+                    break;
                 end
                 
                 % Saving old f to check progression
@@ -152,7 +146,8 @@ classdef PnBcgSolver < solvers.NlpSolver
             
             %% End of solve
             self.solveTime = toc(self.solveTime);
-            self.solved = ~(self.iStop == 8 || self.iStop == 9);
+            % Set solved attribute
+            self.isSolved();
             
             printObj.footer(self);
         end % solve
@@ -174,7 +169,7 @@ classdef PnBcgSolver < solvers.NlpSolver
             % Failure flag
             failed = false;
             % Projection of current tildex stored in x
-            x = self.nlp.project(zeros(self.nlp.n, 1));
+            x = self.project(zeros(self.nlp.n, 1));
             % Initialize the gradient
             g = A * x - b;
             % Initialize the binding set
@@ -203,7 +198,7 @@ classdef PnBcgSolver < solvers.NlpSolver
                 
                 % Update x and evaluate its projection
                 tildex = x + alph * p;
-                x = self.nlp.project(tildex);
+                x = self.project(tildex);
                 
                 if any(tildex > self.nlp.bU) || any(tildex < self.nlp.bL)
                     g = A * x - b;
@@ -228,6 +223,19 @@ classdef PnBcgSolver < solvers.NlpSolver
             failed = true;
         end % bccg
         
+        function z = project(self, x)
+            %% Project
+            % Project on the bounds assuming x is full-sized.
+            z = min(max(x, self.nlp.bL), self.nlp.bU);
+        end
+        
+        function z = projectSel(self, x, ind)
+            %% ProjectSel
+            % Project on the bounds for a selected set of indices, assuming
+            % x is of reduced size.
+            z = min(max(x, self.nlp.bL(ind)), self.nlp.bU(ind));
+        end
+         
     end
     
 end

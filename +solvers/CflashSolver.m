@@ -41,24 +41,6 @@ classdef CflashSolver < solvers.NlpSolver
     end
     
     properties (Hidden = true, Constant)
-        EXIT_NONE                  = 0;
-        EXIT_OPTIMAL               = 1;
-        EXIT_ITERATIONS            = 2;
-        EXIT_UNBOUNDED             = 3;
-        EXIT_FATOL                 = 4;
-        EXIT_FRTOL                 = 5;
-        EXIT_UNKNOWN               = 6;
-        EXIT_PROJECTIONS           = 7;
-        EXIT_MSG = {
-            'Optimal solution found', ...                               % 1
-            'Too many iterations', ...                                  % 2
-            'Unbounded below', ...                                      % 3
-            'Absolute function tolerance', ...                          % 4
-            'Relative function tolerance', ...                          % 5
-            'Unknown exit', ...                                         % 6
-            'Maximum number of projections reached', ...                % 7
-            };
-        
         % Constants used to manipulate the TR radius. These are the numbers
         % used by TRON.
         sig1 = 0.25;
@@ -69,15 +51,16 @@ classdef CflashSolver < solvers.NlpSolver
         eta2 = 0.75;
         
         % Log header and body formats.
-        logH = '\n%5s  %13s  %13s  %9s %5s  %9s  %9s %9s\n';
-        logB = '%5i  %13.6e  %13.6e  %9d %5i  %9.3e  %9.3e  %3s %d\n';
-        logT = {'iter', 'f(x)', '|g(x)|', '# Proj', 'cg', 'preRed', ...
-            'radius', '#free'};
+        LOG_HEADER_FORMAT = '\n%5s  %13s  %13s  %9s %5s  %9s  %9s %9s\n';
+        LOG_BODY_FORMAT = ['%5i  %13.6e  %13.6e  %9d %5i  %9.3e', ...
+            '  %9.3e  %3s  %d\n'];
+        LOG_HEADER = {'iter', 'f(x)', '|g(x)|', '# Proj', 'cg', ...
+            'preRed', 'radius', '#free'};
         
-        %         % TRPCG header and body formats
-        %         trpcg_header = sprintf('\t%-5s  %9s  %8s  %8s', 'Iter', ...
-        %             '||r''*g||', 'curv', '||(Cp)_i||');
-        %         trpcg_fmt = '\t%-5d  %9.2e  %8.2e  %8.2e';
+        % TRPCG header and body formats
+        % trpcg_header = sprintf('\t%-5s  %9s  %8s  %8s', 'Iter', ...
+        %    '||r''*g||', 'curv', '||(Cp)_i||');
+        % trpcg_fmt = '\t%-5d  %9.2e  %8.2e  %8.2e';
         
     end % constant properties
     
@@ -127,7 +110,6 @@ classdef CflashSolver < solvers.NlpSolver
             self.fMin = p.Results.fMin;
             self.mu0 = p.Results.mu0;
             self.fid = p.Results.fid;
-            self.backtrack = p.Results.backtrack;
             self.eqTol = p.Results.eqTol;
             self.maxProj = p.Results.maxProj;
             
@@ -142,7 +124,7 @@ classdef CflashSolver < solvers.NlpSolver
             printObj = utils.PrintInfo('Cflash');
             
             if self.verbose >= 2
-                extra = containers.Map( ... 
+                extra = containers.Map( ...
                     {'fMin', 'cgTol', 'mu0', 'maxProj', 'eqTol'}, ...
                     {self.fMin, self.cgTol, self.mu0, self.maxProj, ...
                     self.eqTol});
@@ -183,7 +165,7 @@ classdef CflashSolver < solvers.NlpSolver
                 
                 exit = pgNorm <= self.rOptTol + self.aOptTol;
                 if ~self.iStop && exit
-                    self.iStop = self.EXIT_OPTIMAL;
+                    self.iStop = self.EXIT_OPT_TOL;
                 end
                 
                 exit = f < self.fMin;
@@ -194,39 +176,46 @@ classdef CflashSolver < solvers.NlpSolver
                 exit = abs(actRed) <= self.aFeasTol && ...
                     preRed  <= self.aFeasTol;
                 if ~self.iStop && exit
-                    self.iStop = self.EXIT_FATOL;
+                    self.iStop = self.EXIT_FEAS_TOL;
                 end
                 
                 exit = abs(actRed) <= self.rFeasTol && ...
                     preRed  <= self.rFeasTol;
                 if ~self.iStop && exit
-                    self.iStop = self.EXIT_FRTOL;
+                    self.iStop = self.EXIT_FEAS_TOL;
                 end
                 
                 exit = self.iter >= self.maxIter;
                 if ~self.iStop && exit
-                    self.iStop = self.EXIT_ITERATIONS;
+                    self.iStop = self.EXIT_MAX_ITER;
                 end
                 
                 exit = self.nProj >= self.maxProj;
                 if ~self.iStop && exit
-                    self.iStop = self.EXIT_PROJECTIONS;
+                    self.iStop = self.EXIT_MAX_PROJ;
+                end
+                
+                exit = toc(self.solveTime) >= self.maxRT;
+                if ~self.iStop && exit
+                    self.iStop = self.EXIT_MAX_RT;
                 end
                 
                 % Print current iter to log
                 if self.verbose >= 2
                     if mod(self.iter, 20) == 0
-                        fprintf(self.logH, self.logT{:});
-                        %                         self.logger.info(sprintf(self.logH, self.logT{:}));
+                        fprintf(self.LOG_HEADER_FORMAT, ...
+                            self.LOG_HEADER{:});
+                        %                         self.logger.info(sprintf(self.LOG_HEADER_FORMAT, self.LOG_HEADER{:}));
                     end
                     if self.iter == 0 || successful
                         status = '';
                     else
                         status = 'rej';
                     end
-                    self.printf(self.logB, self.iter, f, pgNorm, ...
-                        self.nProj, iterCg, preRed, delta, status, nFree);
-                    %                     self.logger.info(sprintf(self.logB, self.iter, ...
+                    self.printf(self.LOG_BODY_FORMAT, self.iter, f, ...
+                        pgNorm, self.nProj, iterCg, preRed, delta, ...
+                        status, nFree);
+                    %                     self.logger.info(sprintf(self.LOG_BODY_FORMAT, self.iter, ...
                     %                         f, pgNorm, iterCg, preRed, delta, status, ...
                     %                         nFree));
                 end
@@ -310,10 +299,10 @@ classdef CflashSolver < solvers.NlpSolver
             self.nHess = self.nlp.ncalls_hvp + self.nlp.ncalls_hes;
             
             %% End of solve
-            self.solved = ~(self.istop == 2 || self.istop == 6 || ...
-                self.istop == 7);
             self.solveTime = toc(self.solveTime);
-
+            % Set solved attribute
+            self.isSolved();
+            
             printObj.footer(self);
         end % solve
         
@@ -325,12 +314,16 @@ classdef CflashSolver < solvers.NlpSolver
         function xProj = project(self, x)
             %% Project - simple wrapper to increment nProj counter
             xProj = self.nlp.project(x);
+            if ~self.nlp.solved
+                % Propagate throughout the program to exit
+                self.iStop = self.EXIT_PROJ_FAILURE;
+            end
             self.nProj = self.nProj + 1;
         end
         
-        function xProj = eqProject(self, x, ind)
+        function xProj = eqProject(self, x, ind, tol, iterMax)
             %% EqProject - simple wrapper to increment nProj counter
-            xProj = self.nlp.eqProject(x, ind);
+            xProj = self.nlp.eqProject(x, ind, tol, iterMax);
             self.nProj = self.nProj + 1;
         end
         
@@ -357,7 +350,8 @@ classdef CflashSolver < solvers.NlpSolver
             %
             % where mu_0 is a constant in (0,1).
             self.logger.debug('-- Entering Cauchy --');
-            self.logger.debug(sprintf('α = %7.1e, δ = %7.3e', alph, delta));
+            self.logger.debug(sprintf('α = %7.1e, δ = %7.3e', ...
+                alph, delta));
             interpf =  0.1;         % interpolation factor
             extrapf = 1 / interpf;  % extrapolation factor
             
@@ -384,7 +378,7 @@ classdef CflashSolver < solvers.NlpSolver
                 self.logger.debug('Interpolating');
                 % Reduce alph until a successful step is found.
                 search = true;
-                while search
+                while search && toc(self.solveTime) < self.maxRT
                     % This is a crude interpolation procedure that
                     % will be replaced in future versions of the code.
                     alph = interpf * alph;
@@ -403,7 +397,8 @@ classdef CflashSolver < solvers.NlpSolver
                 % Increase alph until a successful step is found.
                 search = true;
                 alphas = alph;
-                while search && alph <= brptMax
+                while search && alph <= brptMax && ... 
+                        toc(self.solveTime) < self.maxRT
                     % This is a crude extrapolation procedure that
                     % will be replaced in future versions of the code.
                     alph = extrapf * alph;
@@ -486,7 +481,8 @@ classdef CflashSolver < solvers.NlpSolver
             % satisfied or x + alph*w is feasible.
             search = true;
             self.logger.debug('Interpolating');
-            while search && alph > brptMin
+            while search && alph > brptMin && ...
+                    toc(self.solveTime) < self.maxRT
                 % Calculate P[x + alph*w] - x and check the sufficient
                 % decrease condition.
                 nSteps = nSteps + 1;
@@ -623,18 +619,18 @@ classdef CflashSolver < solvers.NlpSolver
                 % if the step is at the trust region bound.
                 if gfnormf <= rtol * gfNorm
                     info = 1;
-                    self.logger.debug(sprintf(['Leaving SPCG, info = %d', ...
-                        ' (conv)'], info));
+                    self.logger.debug(sprintf( ...
+                        ['Leaving SPCG, info = %d', ' (conv)'], info));
                     return
                 elseif infotr == 3 || infotr == 4
                     info = 2;
-                    self.logger.debug(sprintf(['Leaving SPCG, info = %d', ...
-                        ' (TR)'], info));
+                    self.logger.debug(sprintf( ... 
+                        ['Leaving SPCG, info = %d', ' (TR)'], info));
                     return
                 elseif iters > iterMax
                     info = 3;
-                    self.logger.debug(sprintf(['Leaving SPCG, info = %d', ...
-                        ' (fail)'], info));
+                    self.logger.debug(sprintf( ...
+                        ['Leaving SPCG, info = %d', ' (fail)'], info));
                     return
                 end
             end % faces
@@ -705,7 +701,8 @@ classdef CflashSolver < solvers.NlpSolver
             %       info = 5  Failure to converge within iterMax iterations
             
             self.logger.debug('-- Entering TRPCG --');
-            self.logger.debug(sprintf('tol = %7.3e, δ = %7.3e,', tol, delta));
+            self.logger.debug(sprintf( ...
+                'tol = %7.3e, δ = %7.3e,', tol, delta));
             % Initialize the iterate w and the residual r.
             w = zeros(self.nlp.n, 1);
             % Initialize the residual r of grad q to -g.
@@ -731,12 +728,13 @@ classdef CflashSolver < solvers.NlpSolver
                 chk = any(Cp(~indFree) >= appZero);
                 if chk
                     % Project {p : (C*p)_i = 0} for i such as (C*x)_i = 0
-                    p = self.eqProject(p, ~indFree);
+                    p = self.eqProject(p, ~indFree, ...
+                        self.aOptTol + self.rOptTol, self.nlp.n);
                 end
                 
-                %                 Cp = self.nlp.fcon(p); % Computes C*p
-                %                 normCp = norm(Cp(~indFree)); % Should be near 0
-                %                 self.logger.debug(sprintf('\t||(C*p)_i|| = %7.3e', normCp));
+                % Cp = self.nlp.fcon(p); % Computes C*p
+                % normCp = norm(Cp(~indFree)); % Should be near 0
+                % self.logger.debug(sprintf('\t||(C*p)_i|| = %7.3e', normCp));
                 
                 % Compute alph and determine sigma such that the trust
                 % region constraint || w + sigma*p || = delta is satisfied.
@@ -760,11 +758,13 @@ classdef CflashSolver < solvers.NlpSolver
                     end
                     if ptq <= 0
                         info = 3;
-                        self.logger.debug(sprintf(['Leaving TRPCG, info', ...
+                        self.logger.debug(sprintf( ...
+                            ['Leaving TRPCG, info', ...
                             ' = %d (negative curv)'], info));
                     else
                         info = 4;
-                        self.logger.debug(sprintf(['Leaving TRPCG, info', ...
+                        self.logger.debug(sprintf( ...
+                            ['Leaving TRPCG, info', ...
                             ' = %d (exit TR)'], info));
                     end
                     return
@@ -791,8 +791,8 @@ classdef CflashSolver < solvers.NlpSolver
             
             iters = iterMax;
             info = 5;
-            self.logger.debug(sprintf('Leaving TRPCG, info = %d (fail)', ...
-                info));
+            self.logger.debug(sprintf( ...
+                'Leaving TRPCG, info = %d (fail)', info));
         end % trpcg
         
         function [nBrpt, brptMin, brptMax] = breakpt(self, x, w)

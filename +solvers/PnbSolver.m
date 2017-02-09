@@ -14,15 +14,6 @@ classdef PnbSolver < solvers.NlpSolver
             'nWorking'};
         LOG_FORMAT = '%10s %10s %15s %15s %10s\n';
         LOG_BODY = '%10d %10d %15.5e %15.5e %10d\n';
-        EXIT_MSG = { ...
-            ['All variables are at their bound and no further', ...
-            ' progress is possible\n'], ...                             % 1
-            'All working variables satisfy optimality condition\n', ... % 2
-            'Function value changing by less than funcTol\n', ...       % 3
-            'Function Evaluations exceeds maxEval\n', ...               % 4
-            'Maximum number of iterations reached\n', ...               % 5
-            'Maximum number of iterations in line search reached\n', ...% 6
-            };
     end % constant properties
     
     
@@ -71,7 +62,7 @@ classdef PnbSolver < solvers.NlpSolver
             
             self.solveTime = tic;
             self.iter = 1;
-            self.iStop = 0;
+            self.iStop = self.EXIT_NONE;
             
             printObj = utils.PrintInfo('Pnb');
             
@@ -97,7 +88,7 @@ classdef PnbSolver < solvers.NlpSolver
             self.rFeasTol = self.aFeasTol * abs(f);
             
             %% Main loop
-            while self.iStop == 0
+            while ~self.iStop % self.iStop == 0
                 
                 % Get working set of variables
                 working = self.getWorkingSet(x, g, H);
@@ -115,18 +106,20 @@ classdef PnbSolver < solvers.NlpSolver
                 
                 % Checking various stopping conditions, exit if true
                 if ~any(working)
-                    self.iStop = 1;
+                    self.iStop = self.EXIT_ALL_BOUND;
                 elseif pgnrm < self.rOptTol + self.aOptTol
-                    self.iStop = 2;
+                    self.iStop = self.EXIT_OPT_TOL;
                 elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
-                    self.iStop = 3;
+                    self.iStop = self.EXIT_FEAS_TOL;
                 elseif self.nObjFunc >= self.maxEval
-                    self.iStop = 4;
+                    self.iStop = self.EXIT_MAX_EVAL;
                 elseif self.iter >= self.maxIter
-                    self.iStop = 5;
+                    self.iStop = self.EXIT_MAX_ITER;
+                elseif toc(self.solveTime) >= self.maxRT
+                    self.iStop = self.EXIT_MAX_RT;
                 end
                 
-                if self.iStop ~= 0
+                if self.iStop % self.iStop ~= 0
                     break
                 end
                 
@@ -167,7 +160,8 @@ classdef PnbSolver < solvers.NlpSolver
             
             %% End of solve
             self.solveTime = toc(self.solveTime);
-            self.solved = ~(self.iStop == 8 || self.iStop == 9);
+            % Set solved attribute
+            self.isSolved();
             
             printObj.footer(self);
         end % solve
@@ -264,7 +258,7 @@ classdef PnbSolver < solvers.NlpSolver
                     return;
                 elseif iterLS >= self.maxIterLS
                     % Maximal number of iterations reached, abort
-                    self.iStop = 6;
+                    self.iStop = self.EXIT_MAX_ITER_LS;
                     return;
                 end
                 % Decrease step size

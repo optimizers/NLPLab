@@ -10,7 +10,6 @@ classdef LbfgsbSolver < solvers.NlpSolver
         postProcessing = [];
         iterGuard = [];
         startAttempt = [];
-        maxRT;
     end
     
     
@@ -27,14 +26,12 @@ classdef LbfgsbSolver < solvers.NlpSolver
             p = inputParser;
             p.KeepUnmatched = true;
             p.addParameter('corrections', 7);
-            p.addParameter('maxRT', 1e4);
             
             p.parse(varargin{:});
             
             self = self@solvers.NlpSolver(nlp, p.Unmatched);
 
             self.corrections = p.Results.corrections;
-            self.maxRT = p.Results.maxRT;
         end
         
         function self = solve(self)

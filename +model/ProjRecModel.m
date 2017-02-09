@@ -1,7 +1,7 @@
 classdef ProjRecModel < model.RecModel
     %% ProjRecModel - Extension of RecModel for solvers w. proj. sub.-prob.
     %   This model provides a 
-    %           [z, solver] = project(self, x)
+    %           z = project(self, x)
     %   method that projects on the constraint set C*x >= 0. This model is
     %   required if a projection method is used on RecModel. For instance,
     %   minConf-nlp and Cflash require a ProjRecModel.
@@ -13,12 +13,10 @@ classdef ProjRecModel < model.RecModel
     
     
     properties (SetAccess = private, Hidden = false)
-        % The model representing the projection problem
-        projModel;
         % The solver used to solve projModel
         projSolver;
-        % Proj solver's parameters
-        projOptions;
+        solved;
+        normJac;
     end
     
     
@@ -55,7 +53,10 @@ classdef ProjRecModel < model.RecModel
             if ~isa(projSolver, 'solvers.NlpSolver')
                error('projSolver must be a subclass of solvers.NlpSolver');
             end
+            
             self.projSolver = projSolver;
+            % Getting projModel's normJac property
+            self.normJac = self.projSolver.nlp.normJac;
         end
         
         function z = project(self, x)
@@ -74,8 +75,23 @@ classdef ProjRecModel < model.RecModel
             % Calling the solver to solve the problem
             self.projSolver.solve();
             
+            self.solved = self.projSolver.solved;
+            
             % Finding the primal variable from the dual variable
             z = self.projSolver.nlp.dualToPrimal(self.projSolver.x);
+        end
+        
+        function w = eqProject(self, d, ind, tol, iterMax)
+            %% eqProject - Call eqProject from ProjModel
+            % Solves the problem
+            % min   1/2 || w - d||^2
+            %   w   sc (C*w)_i = 0, for i \not \in the working set
+            % Input:
+            %   - d: vector to project on (C*d)_i = 0
+            %   - ind: logical array of constraints that must be = 0
+            % Output:
+            %   - w: the projection of d
+            w = self.projSolver.nlp.eqProject(d, ind, tol, iterMax);
         end
         
     end

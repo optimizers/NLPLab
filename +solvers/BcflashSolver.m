@@ -1,5 +1,5 @@
 classdef BcflashSolver < solvers.NlpSolver
-    %% BcflashSolver - Calls the bcflash solver
+    %% BcflashSolver
     
     
     properties (SetAccess = private, Hidden = false)
@@ -14,22 +14,7 @@ classdef BcflashSolver < solvers.NlpSolver
         fid            % File ID of where to direct log output
     end % hidden gettable private properties
     
-    properties (Hidden=true, Constant)
-        EXIT_NONE                  = 0;
-        EXIT_OPTIMAL               = 1;
-        EXIT_ITERATIONS            = 2;
-        EXIT_UNBOUNDED             = 3;
-        EXIT_FATOL                 = 4;
-        EXIT_FRTOL                 = 5;
-        EXIT_UNKNOWN               = 6;
-        EXIT_MSG = {
-            'Optimal solution found'
-            'Too many iters'
-            'Unbounded below'
-            'Absolute function tolerance'
-            'Relative function tolerance'
-            'Unknown exit'};
-        
+    properties (Hidden = true, Constant)        
         % Constants used to manipulate the TR radius. These are the numbers
         % used by TRON.
         sig1 = 0.25;
@@ -40,9 +25,9 @@ classdef BcflashSolver < solvers.NlpSolver
         eta2 = 0.75;
         
         % Log header and body formats.
-        logH = '\n%5s  %13s  %13s  %5s  %9s  %9s\n';
-        logB = '%5i  %13.6e  %13.6e  %5i  %9.3e  %9.3e  %3s\n';
-        logT = {'iter','f(x)','|g(x)|','cg','preRed','radius'};
+        LOG_HEADER_FORMAT = '\n%5s  %13s  %13s  %5s  %9s  %9s\n';
+        LOG_BODY_FORMAT = '%5i  %13.6e  %13.6e  %5i  %9.3e  %9.3e  %3s\n';
+        LOG_HEADER = {'iter', 'f(x)', '|g(x)|', 'cg', 'preRed', 'radius'};
     end % constant properties
     
     
@@ -122,7 +107,7 @@ classdef BcflashSolver < solvers.NlpSolver
                     self.nlp.bU, g);
                 exit = pgNorm <= self.rOptTol;
                 if ~self.iStop && exit
-                    self.iStop = self.EXIT_OPTIMAL;
+                    self.iStop = self.EXIT_OPT_TOL;
                 end
                 
                 exit = f < self.fMin;
@@ -133,31 +118,36 @@ classdef BcflashSolver < solvers.NlpSolver
                 exit = abs(actRed) <= self.aFeasTol && ...
                     preRed  <= self.aFeasTol;
                 if ~self.iStop && exit
-                    self.iStop = self.EXIT_FATOL;
+                    self.iStop = self.EXIT_FEAS_TOL;
                 end
                 
                 exit = abs(actRed) <= self.rFeasTol && ...
                     preRed  <= self.rFeasTol;
                 if ~self.iStop && exit
-                    self.iStop = self.EXIT_FRTOL;
+                    self.iStop = self.EXIT_FEAS_TOL;
                 end
                 
                 exit = self.iter >= self.maxIter;
                 if ~self.iStop && exit
-                    self.iStop = self.EXIT_ITERATIONS;
+                    self.iStop = self.EXIT_MAX_ITER;
+                end
+                
+                exit = toc(self.solveTime) >= self.maxRT;
+                if ~self.iStop && exit
+                    self.iStop = self.EXIT_MAX_RT;
                 end
                 
                 % Print current iter to log
                 if self.verbose >= 2
                     if mod(self.iter, 20) == 0
-                        fprintf(self.logH, self.logT{:});
+                        fprintf(self.LOG_HEADER_FORMAT, self.LOG_HEADER{:});
                     end
                     if self.iter == 0 || successful
                         status = '';
                     else
                         status = 'rej';
                     end
-                    self.printf(self.logB, self.iter, f, pgNorm, itCg, ...
+                    self.printf(self.LOG_BODY_FORMAT, self.iter, f, pgNorm, itCg, ...
                         preRed, delta, status);
                 end
                 
@@ -236,7 +226,8 @@ classdef BcflashSolver < solvers.NlpSolver
             
             %% End of solve
             self.solveTime = toc(self.solveTime);
-            self.solved = ~(self.iStop == 2 || self.iStop == 6);
+            % Set solved attribute
+            self.isSolved();
             
             printObj.footer(self);
         end % solve

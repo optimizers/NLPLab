@@ -8,6 +8,10 @@ classdef BoundProj < handle
     %
     %   min_x { 1/2 || z - x ||^2 : bL <= z <= bU }
     
+    properties (SetAccess = private)
+       solved = true; 
+    end
+    
     methods (Access = public)
         
         function z = project(self, x)

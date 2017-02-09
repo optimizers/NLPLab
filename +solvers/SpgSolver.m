@@ -66,15 +66,6 @@ classdef SpgSolver < solvers.NlpSolver
             'Function Val', '||Pg||'};
         LOG_FORMAT_OPT = '%10s %10s %10s %15s %15s %15s\n';
         LOG_BODY_OPT = '%10d %10d %10d %15.5e %15.5e %15.5e\n';
-        EXIT_MSG = { ...
-            ['First-Order Optimality Conditions Below optTol at', ...
-            ' Initial Point\n'], ...                                    % 1
-            'Directional Derivative below feasTol\n', ...               % 2
-            'First-Order Optimality Conditions Below optTol\n', ...     % 3
-            'Step size below progTol\n', ...                            % 4
-            'Function value changing by less than feasTol\n', ...       % 5
-            'Function Evaluations exceeds maxEval\n', ...               % 6
-            'Maximum number of iterations reached\n'};                  % 7
     end % constant properties
     
     
@@ -105,7 +96,7 @@ classdef SpgSolver < solvers.NlpSolver
             p.addParameter('useSpectral', 1);
             p.addParameter('projectLS', 0);
             p.addParameter('testOpt', 1);
-            p.addParameter('bbType', 0);
+            p.addParameter('bbType', 1);
             p.addParameter('fid', 1);
             p.addParameter('maxIterLS', 50); % Max iters for linesearch
             
@@ -154,7 +145,7 @@ classdef SpgSolver < solvers.NlpSolver
             end
             
             % Exit flag set to 0, will exit if not 0
-            self.iStop = 0;
+            self.iStop = self.EXIT_NONE;
             % Resetting the counters
             self.nProj = 0;
             self.iter = 1;
@@ -177,7 +168,7 @@ classdef SpgSolver < solvers.NlpSolver
             end
             
             %% Main loop
-            while self.iStop == 0
+            while ~self.iStop % self.iStop == 0
                 % Compute Step Direction
                 if self.iter == 1 || ~self.useSpectral
                     alph = 1;
@@ -208,7 +199,7 @@ classdef SpgSolver < solvers.NlpSolver
                 % Check that Progress can be made along the direction
                 gtd = g' * d;
                 if gtd > -self.aFeasTol * norm(g) * norm(d) - self.aFeasTol
-                    self.iStop = 2;
+                    self.iStop = self.EXIT_DIR_DERIV;
                     % Leaving now saves some processing
                     break;
                 end
@@ -274,20 +265,22 @@ classdef SpgSolver < solvers.NlpSolver
                 % Check optimality
                 if self.testOpt
                     if pgnrm < self.rOptTol + self.aOptTol
-                        self.iStop = 3;
+                        self.iStop = self.EXIT_OPT_TOL;
                     end
                 end
                 if max(abs(t * d)) < self.aFeasTol * norm(d) + ...
                         self.aFeasTol
-                    self.iStop = 4;
+                    self.iStop = self.EXIT_DIR_DERIV;
                 elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
-                    self.iStop = 5;
+                    self.iStop = self.EXIT_FEAS_TOL;
                 elseif self.nObjFunc > self.maxEval
-                    self.iStop = 6;
+                    self.iStop = self.EXIT_MAX_EVAL;
                 elseif self.iter >= self.maxIter
-                    self.iStop = 7;
+                    self.iStop = self.EXIT_MAX_ITER;
+                elseif toc(self.solveTime) >= self.maxRT
+                    self.iStop = self.EXIT_MAX_RT;
                 end
-                if self.iStop ~= 0
+                if self.iStop % self.iStop ~= 0
                     break;
                 end
                 self.iter = self.iter + 1;
@@ -301,8 +294,9 @@ classdef SpgSolver < solvers.NlpSolver
             self.nHess = self.nlp.ncalls_hvp + self.nlp.ncalls_hes;
             
             %% End of solve
-            self.solved = ~(self.iStop == 6 || self.iStop == 7);
             self.solveTime = toc(self.solveTime);
+            % Set solved attribute
+            self.isSolved();
             
             printObj.footer(self);
         end % solve
@@ -331,6 +325,10 @@ classdef SpgSolver < solvers.NlpSolver
         function z = project(self, x)
             %% Project - projecting x on the constraint set
             z = self.nlp.project(x);
+            if ~self.nlp.solved
+                % Propagate throughout the program to exit
+                self.iStop = self.EXIT_PROJ_FAILURE;
+            end
             self.nProj = self.nProj + 1;
         end
         
@@ -340,17 +338,11 @@ classdef SpgSolver < solvers.NlpSolver
             failed = false;
             iterLS = 1;
             while fNew > funRef + self.suffDec* g' * (xNew - x)
-                if self.verbose == 2
-                    fprintf('Halving Step Size\n');
-                end
                 t = t / 2;
                 
                 % Check whether step has become too small
                 if max(abs(t * d)) < self.aFeasTol * norm(d) ...
                         || t == 0 || iterLS > self.maxIterLS
-                    if self.verbose == 2
-                        fprintf('Line Search failed\n');
-                    end
                     failed = true;
                     t = 0;
                     xNew = x;
