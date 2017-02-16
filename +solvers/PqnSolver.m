@@ -135,12 +135,31 @@ classdef PqnSolver < solvers.NlpSolver
             
             import utils.PrintInfo;
             %             import linesearch.armijo;
+            
+            self.stats.proj = struct;
+            self.stats.proj.info = [];
+            self.stats.proj.infoHeader = ...
+                {'nProj', 'iter', 'nObjFunc', 'nGrad', 'nHess', ...
+                'pgNorm', 'solveTime'};
+            self.stats.proj.exit = {};
+                
+            self.stats.rec = struct;
+            self.stats.rec.info = [];
+            self.stats.rec.infoHeader = ...
+                {'iter', 'nObjFunc', 'nGrad', 'nHess', 'nProj', ...
+                'innerIter', 'pgNorm', 'solveTime'};
+            self.stats.rec.exit = {};
         end % constructor
         
         function self = solve(self)
             %% Solve
             
             self.solveTime = tic;
+            self.nProj = 0;
+            self.iter = 1;
+            self.spgIter = 0;
+            self.nlp.resetCounters();
+            self.iStop = self.EXIT_NONE;
             
             printObj = utils.PrintInfo('Pqn');
             
@@ -159,13 +178,6 @@ classdef PqnSolver < solvers.NlpSolver
                 self.printf(self.LOG_FORMAT, self.LOG_HEADER{:});
             end
             
-            % Setting counters
-            self.nProj = 0;
-            self.iter = 1;
-            self.spgIter = 0;
-            
-            % Exit flag set to 0, will exit if not 0
-            self.iStop = self.EXIT_NONE;
             % Project initial parameter vector
             x = self.project(self.nlp.x0);
             
@@ -270,6 +282,15 @@ classdef PqnSolver < solvers.NlpSolver
                         (norm(g) * norm(d)));
                 end
                 
+                self.nObjFunc = self.nlp.ncalls_fobj + ...
+                    self.nlp.ncalls_fcon;
+                self.nGrad = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
+                self.nHess = self.nlp.ncalls_hvp + self.nlp.ncalls_hes;
+                
+                self.stats.rec.info = [self.stats.rec.info; ...
+                    [self.iter, self.nObjFunc, self.nGrad, self.nHess, ...
+                    self.nProj, self.spgIter, pgnrm, toc(self.solveTime)]];
+                
                 % Check optimality conditions
                 if pgnrm < self.rOptTol + self.aOptTol
                     self.iStop = self.EXIT_OPT_TOL;
@@ -308,6 +329,8 @@ classdef PqnSolver < solvers.NlpSolver
             self.isSolved();
             
             printObj.footer(self);
+            
+            self.stats.rec.exit{end + 1} = self.EXIT_MSG{self.iStop};
         end % solve
         
         function printf(self, varargin)
@@ -338,6 +361,19 @@ classdef PqnSolver < solvers.NlpSolver
                 % Propagate throughout the program to exit
                 self.iStop = self.EXIT_PROJ_FAILURE;
             end
+            
+            % This can be removed later
+            if isprop(self.nlp, 'projSolver')
+                solver = self.nlp.projSolver;
+                % Collecting statistics
+                self.stats.proj.info = [self.stats.proj.info; ...
+                    [self.nProj, solver.iter, solver.nObjFunc, ...
+                    solver.nGrad, solver.nHess, solver.pgNorm, ...
+                    solver.solveTime]];
+                self.stats.proj.exit{end + 1} = ...
+                    solver.EXIT_MSG{solver.iStop};
+            end
+            
             self.nProj = self.nProj + 1;
         end
         
@@ -391,8 +427,8 @@ classdef PqnSolver < solvers.NlpSolver
             end
             
             % Retrieving solution, number of proj calls & inner iterations
-            self.spgIter = subProblem.iter;
-            self.iter = self.iter + self.spgIter;
+            self.spgIter = self.spgIter + subProblem.iter;
+%             self.iter = self.iter + self.spgIter;
             self.nProj = self.nProj + subProblem.nProj;
             p = subProblem.x;
         end % solveSubProblem

@@ -54,10 +54,12 @@ classdef PnBcgSolver < solvers.NlpSolver
         
         function self = solve(self)
             %% Solve using the Projected Newton for bounds algorithm
+            
             self.solveTime = tic;
             self.iter = 1;
             self.iStop = self.EXIT_NONE;
             self.cgIter = 0;
+            self.nlp.resetCounters();
             
             printObj = utils.PrintInfo('PnBcg');
             

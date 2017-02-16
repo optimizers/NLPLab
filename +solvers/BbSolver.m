@@ -84,7 +84,7 @@ classdef BbSolver < solvers.NlpSolver
             self.stats.rec.info = [];
             self.stats.rec.infoHeader = ...
                 {'iter', 'nObjFunc', 'nGrad', 'nHess', 'nProj', ...
-                'pgNorm', 'solveTime'};
+                'innerIter', 'pgNorm', 'solveTime'};
             self.stats.rec.exit = {};
         end % constructor
         
@@ -92,6 +92,12 @@ classdef BbSolver < solvers.NlpSolver
             %% Solve
             
             self.solveTime = tic;
+            self.nlp.resetCounters();
+            % Exit flag set to 0, will exit if not 0
+            self.iStop = self.EXIT_NONE;
+            % Resetting the counters
+            self.nProj = 0;
+            self.iter = 1;
             
             printObj = utils.PrintInfo('Bb');
             
@@ -104,12 +110,6 @@ classdef BbSolver < solvers.NlpSolver
                 printObj.header(self, extra);
                 fprintf(self.LOG_FORMAT, self.LOG_HEADER{:});
             end
-            
-            % Exit flag set to 0, will exit if not 0
-            self.iStop = self.EXIT_NONE;
-            % Resetting the counters
-            self.nProj = 0;
-            self.iter = 1;
             
             % Make sure point is feasible
             x = self.project(self.nlp.x0);
@@ -136,7 +136,6 @@ classdef BbSolver < solvers.NlpSolver
                 self.nGrad = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
                 self.nHess = self.nlp.ncalls_hvp + self.nlp.ncalls_hes;
                 
-                
                 if self.verbose >= 2
                     self.printf(self.LOG_BODY, self.iter, ...
                         self.nObjFunc, self.nProj, t, f, pgnrm);
@@ -144,7 +143,7 @@ classdef BbSolver < solvers.NlpSolver
                 
                 self.stats.rec.info = [self.stats.rec.info; ...
                     [self.iter, self.nObjFunc, self.nGrad, self.nHess, ...
-                    self.nProj, pgnrm, toc(self.solveTime)]];
+                    self.nProj, 0, pgnrm, toc(self.solveTime)]];
                 
                 % Checking stopping conditions
                 if pgnrm < self.rOptTol + self.aOptTol

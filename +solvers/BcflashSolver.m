@@ -3,18 +3,18 @@ classdef BcflashSolver < solvers.NlpSolver
     
     
     properties (SetAccess = private, Hidden = false)
-        maxCgIter      % maximum number of CG iters per Newton step
-        nSuccessIter = 0 % number of successful iters
-        iterCg = 0    % total number of CG iters
-        gNorm0         % norm of the gradient at x0
-        exitMsg       % string indicating exit
-        mu0            % sufficient decrease parameter
-        cgTol
-        fMin
-        fid            % File ID of where to direct log output
-    end % hidden gettable private properties
+        maxIterCg; % maximum number of CG iters per Newton step
+        nSuccessIter; % number of successful iters
+        iterCg; % total number of CG iters
+        gNorm0; % norm of the gradient at x0
+        mu0; % sufficient decrease parameter
+        cgTol;
+        fMin;
+        fid; % File ID of where to direct log output
+        useBb;
+    end
     
-    properties (Hidden = true, Constant)        
+    properties (Hidden = true, Constant)
         % Constants used to manipulate the TR radius. These are the numbers
         % used by TRON.
         sig1 = 0.25;
@@ -25,9 +25,11 @@ classdef BcflashSolver < solvers.NlpSolver
         eta2 = 0.75;
         
         % Log header and body formats.
-        LOG_HEADER_FORMAT = '\n%5s  %13s  %13s  %5s  %9s  %9s\n';
-        LOG_BODY_FORMAT = '%5i  %13.6e  %13.6e  %5i  %9.3e  %9.3e  %3s\n';
-        LOG_HEADER = {'iter', 'f(x)', '|g(x)|', 'cg', 'preRed', 'radius'};
+        LOG_HEADER_FORMAT = '\n%5s  %13s  %13s  %5s  %9s  %9s  %6s  %9s\n';
+        LOG_BODY_FORMAT = ['%5i  %13.6e  %13.6e  %5i  %9.3e  %9.3e', ...
+            '  %6s  %9d\n'];
+        LOG_HEADER = {'iter', 'f(x)', '|g(x)|', 'cg', 'preRed', ...
+            'radius', 'status', 'nFree'};
     end % constant properties
     
     
@@ -40,11 +42,12 @@ classdef BcflashSolver < solvers.NlpSolver
             p = inputParser;
             p.KeepUnmatched = true;
             p.PartialMatching = false;
-            p.addParameter('maxCgIter', length(nlp.x0));
+            p.addParameter('maxIterCg', length(nlp.x0));
             p.addParameter('cgTol', 0.1);
             p.addParameter('fMin', -1e32);
             p.addParameter('mu0', 0.01);
             p.addParameter('fid', 1);
+            p.addParameter('useBb', false);
             
             p.parse(varargin{:});
             
@@ -52,30 +55,36 @@ classdef BcflashSolver < solvers.NlpSolver
             
             % Store various objects and parameters
             self.cgTol = p.Results.cgTol;
-            self.maxCgIter = p.Results.maxCgIter;
+            self.maxIterCg = p.Results.maxIterCg;
             self.fMin = p.Results.fMin;
             self.mu0 = p.Results.mu0;
             self.fid = p.Results.fid;
+            self.useBb = p.Results.useBb;
             
             import utils.PrintInfo;
         end % constructor
         
         function self = solve(self)
             %% Solve
+            
             self.solveTime = tic;
-            self.iter = 0;
+            self.iter = 1;
+            self.iterCg = 1;
+            self.iStop = self.EXIT_NONE;
+            self.nlp.resetCounters();
+            
             
             printObj = utils.PrintInfo('bcflash');
-                    
+            
             if self.verbose >= 2
                 extra = containers.Map({'fMin', 'cgTol', 'mu0'}, ...
                     {self.fMin, self.cgTol, self.mu0});
                 printObj.header(self, extra);
+                self.printf(self.LOG_HEADER_FORMAT, self.LOG_HEADER{:});
             end
             
             % Make sure initial point is feasible
-            x = solvers.BcflashSolver.project(self.nlp.x0, self.nlp.bL, ...
-                self.nlp.bU);
+            x = self.project(self.nlp.x0);
             
             % First objective and gradient evaluation.
             [f, g] = self.nlp.obj(x);
@@ -94,130 +103,89 @@ classdef BcflashSolver < solvers.NlpSolver
             
             % Miscellaneous iter
             alphc = 1;
-            itCg = 0;
-            sigma1 = self.sig1;
-            sigma2 = self.sig2;
-            sigma3 = self.sig3;
-            self.iStop = self.EXIT_NONE;
+            status = '';
             
             %% Main loop
-            while true
+            while ~self.iStop
                 % Check stopping conditions
-                pgNorm = solvers.BcflashSolver.gpnrm2(x, self.nlp.bL, ...
-                    self.nlp.bU, g);
-                exit = pgNorm <= self.rOptTol;
-                if ~self.iStop && exit
+                pgNorm = norm(self.gpstep(x, -1, g));
+                if pgNorm <= self.rOptTol + self.aOptTol
                     self.iStop = self.EXIT_OPT_TOL;
-                end
-                
-                exit = f < self.fMin;
-                if ~self.iStop && exit
+                elseif f < self.fMin
                     self.iStop = self.EXIT_UNBOUNDED;
-                end
-                
-                exit = abs(actRed) <= self.aFeasTol && ...
-                    preRed  <= self.aFeasTol;
-                if ~self.iStop && exit
+                elseif (abs(actRed) <= (self.aFeasTol + self.rFeasTol)) ...
+                        && (preRed  <= (self.aFeasTol + self.rFeasTol))
                     self.iStop = self.EXIT_FEAS_TOL;
-                end
-                
-                exit = abs(actRed) <= self.rFeasTol && ...
-                    preRed  <= self.rFeasTol;
-                if ~self.iStop && exit
-                    self.iStop = self.EXIT_FEAS_TOL;
-                end
-                
-                exit = self.iter >= self.maxIter;
-                if ~self.iStop && exit
+                elseif self.iter >= self.maxIter
                     self.iStop = self.EXIT_MAX_ITER;
-                end
-                
-                exit = toc(self.solveTime) >= self.maxRT;
-                if ~self.iStop && exit
+                elseif toc(self.solveTime) >= self.maxRT
                     self.iStop = self.EXIT_MAX_RT;
                 end
                 
                 % Print current iter to log
                 if self.verbose >= 2
-                    if mod(self.iter, 20) == 0
-                        fprintf(self.LOG_HEADER_FORMAT, self.LOG_HEADER{:});
-                    end
-                    if self.iter == 0 || successful
-                        status = '';
-                    else
-                        status = 'rej';
-                    end
-                    self.printf(self.LOG_BODY_FORMAT, self.iter, f, pgNorm, itCg, ...
-                        preRed, delta, status);
+                    [~, nFree] = self.getIndFree(x);
+                    self.printf(self.LOG_BODY_FORMAT, self.iter, f, ...
+                        pgNorm, self.iterCg, preRed, delta, status, nFree);
                 end
                 
                 % Act on exit conditions
                 if self.iStop
-                    self.exitMsg = self.EXIT_MSG{self.iStop};
                     self.x = x;
                     self.fx = f;
                     self.pgNorm = pgNorm;
                     break
                 end
                 
-                %% Iteration starts here
-                self.iter = self.iter + 1;
                 fc = f;
                 xc = x;
                 
-                % Hessian operator.
-                Aprod = @(v) self.nlp.hobjprod(x, [], v);
+                % Hessian operator
+                H = self.nlp.hobj(x);
                 
-                [alphc, s] = self.cauchy(Aprod, x, g, delta, alphc);
+                % Cauchy step
+                [alphc, s] = self.cauchy(H, x, g, delta, alphc);
                 
-                % Projected Newton step.
-                [x, s, itCg, ~] = self.spcg(Aprod, x, g, delta, ...
-                    self.cgTol, s, self.maxCgIter, self.nlp.bL, ...
-                    self.nlp.bU);
-                self.iterCg = self.iterCg + itCg;
+                % Projected Newton step
+                [x, s, ~] = self.spcg(H, x, g, delta, s);
                 
                 % Predicted reduction.
-                As = self.nlp.hobjprod(x, [], s);
-                preRed = -(s'*g + 0.5*s'*As);
+                Hs = self.nlp.hobjprod(x, [], s);
+                preRed = -(s'*g + 0.5*s'*Hs);
                 
                 % Compute the objective at this new point.
                 f = self.nlp.fobj(x);
                 actRed = fc - f;
-                sNorm = norm(s);
                 
-                % Update the trust-region radius.
-                if self.nSuccessIter == 0
-                    delta = min(delta, sNorm);
-                end
-                gts = g'*s;
-                if f - fc - gts <= 0
-                    alph = sigma3;
-                else
-                    alph = max(sigma1, -0.5*gts/(f-fc-gts));
-                end
+                % Update the trust-region radius
+                delta = self.updateDelta(f, fc, g, s, actRed, preRed, ...
+                    delta);
                 
-                if actRed < self.eta0 * preRed || actRed == -inf;
-                    delta = min(max(alph, sigma1) * sNorm, sigma2 * delta);
-                elseif actRed < self.eta1 * preRed
-                    delta = max(sigma1 * delta, min(alph * sNorm, ...
-                        sigma2 * delta));
-                elseif actRed < self.eta2 * preRed
-                    delta = max(sigma1 * delta, min(alph * sNorm, ...
-                        sigma3 * delta));
-                else
-                    delta = max(delta, min(alph * sNorm, sigma3 * delta));
-                end
-                
+                % Accept or reject step
                 if actRed > self.eta0 * preRed;
-                    successful = true;
+                    % Successful step
+                    status = '';
                     self.nSuccessIter = self.nSuccessIter + 1;
-                    g = self.nlp.gobj(x);
+                    if self.useBb
+                        % Can only use Bb step if iteration is successful
+                        gOld = g;
+                        % Update the gradient value
+                        g = self.nlp.gobj(x);
+                        % Update initial alphc used in Cauchy
+                        alphc = self.bbStepLength(xc, x, gOld, g);
+                    else
+                        % Update the gradient value
+                        g = self.nlp.gobj(x);
+                    end
                 else
-                    successful = false;
+                    % The step is rejected
+                    status = 'rej';
+                    % Fallback on previous values
                     f = fc;
                     x = xc;
                 end
                 
+                self.iter = self.iter + 1;
             end % main loop
             
             self.nObjFunc = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
@@ -237,15 +205,76 @@ classdef BcflashSolver < solvers.NlpSolver
     
     methods (Access = private)
         
-        function [alph, s] = cauchy(self, Aprod, x, g, delta, alph)
-            %CAUCHY
-            %
+        function alph = bbStepLength(self, xOld, x, gOld, g)
+            %% BBStepLength - Compute Barzilai-Borwein step length
+            % alph_BB = (s' * s) / (s' * y)
+            s = x - xOld;
+            % Denominator of Barzilai-Borwein step length
+            betaBB = s' * (g - gOld);
+            
+            % Find the minimal and maximal break-point on x - alph*g.
+            [~, alphMin, alphMax] = self.breakpt(x, -g);
+            % Safeguard
+            if isinf(alphMax)
+                alphMax = 1e3;
+            end
+            if isinf(alphMin)
+                alphMin = 1e-3;
+            end
+            
+            if betaBB < 0
+                % Fall back to maximal step length
+                alph = alphMax;
+            else
+                % Compute Barzilai-Borwein step length
+                % y = g - gOld
+                % alph_BB = (s' * s) / (s' * y)
+                % Assert alph \in [alph_min, alph_max]
+                alph = min(alphMax, ...
+                    max(alphMin, (s' * s) / betaBB));
+            end
+        end % bbsteplength
+        
+        function delta = updateDelta(self, f, fc, g, s, actRed, preRed, ...
+                delta)
+            %% UpdateDelta
+            % Update trust-region radius according to a set of rules.
+            
+            snorm = norm(s);
+            if self.nSuccessIter == 0
+                delta = min(delta, snorm);
+            end
+            
+            gts = g' * s;
+            if f - fc - gts <= 0
+                alph = self.sig3;
+            else
+                alph = max(self.sig1, -0.5 * gts / (f - fc - gts));
+            end
+            
+            % Changing delta according to a set of rules:
+            if actRed < self.eta0 * preRed || actRed == -inf;
+                delta = min(max(alph, self.sig1) * snorm, ...
+                    self.sig2 * delta);
+            elseif actRed < self.eta1 * preRed
+                delta = max(self.sig1 * delta, min(alph * snorm, ...
+                    self.sig2 * delta));
+            elseif actRed < self.eta2 * preRed
+                delta = max(self.sig1 * delta, min(alph * snorm, ...
+                    self.sig3 * delta));
+            else
+                delta = max(delta, min(alph * snorm, self.sig3 * delta));
+            end
+        end
+        
+        function [alph, s] = cauchy(self, H, x, g, delta, alph)
+            %% Cauchy
             % This subroutine computes a Cauchy step that satisfies a trust
             % region constraint and a sufficient decrease condition.
             %
             % The Cauchy step is computed for the quadratic
             %
-            %       q(s) = 0.5*s'*A*s + g'*s,
+            %       q(s) = 0.5*s'*H*s + g'*s,
             %
             % where A is a symmetric matrix in compressed row storage, and
             % g is a vector. Given a parameter alph, the Cauchy step is
@@ -261,62 +290,51 @@ classdef BcflashSolver < solvers.NlpSolver
             % where mu_0 is a constant in (0,1).
             
             interpf =  0.1;     % interpolation factor
-            extrapf = 10.0;     % extrapolation factor
-            bL = self.nlp.bL;
-            bU = self.nlp.bU;
+            extrapf = 1 / interpf;     % extrapolation factor
             
             % Find the minimal and maximal break-point on x - alph*g.
-            [~, ~, brptMax] = solvers.BcflashSolver.breakpt(x, -g, bL, bU);
+            [~, ~, brptMax] = self.breakpt(x, -g);
             
             % Evaluate the initial alph and decide if the algorithm
             % must interpolate or extrapolate.
-            s = solvers.BcflashSolver.gpstep(x, -alph, g, bL, bU);
+            s = self.gpstep(x, -alph, g);
             
             if norm(s) >= delta
                 interp = true;
             else
-                wa = Aprod(s);
                 gts = g'*s;
-                q = 0.5*s'*wa + gts;
+                q = 0.5*s'*H*s + gts;
                 interp = (q >= self.mu0*gts);
             end
             
             % Either interpolate or extrapolate to find a successful step.
             if interp
-                
                 % Reduce alph until a successful step is found.
                 search = true;
-                while search
-                    
+                while search && (toc(self.solveTime) < self.maxRT)
                     % This is a crude interpolation procedure that
                     % will be replaced in future versions of the code.
-                    alph = interpf*alph;
-                    
-                    s = solvers.BcflashSolver.gpstep(x, -alph, g, bL, bU);
+                    alph = interpf * alph;
+                    s = self.gpstep(x, -alph, g);
                     if norm(s) <= delta
-                        wa = Aprod(s);
                         gts = g'*s;
-                        q = 0.5*s'*wa + gts;
+                        q = 0.5*s'*H*s + gts;
                         search = (q >= self.mu0*gts);
                     end
                 end
-                
             else
-                
                 % Increase alph until a successful step is found.
                 search = true;
                 alphs = alph;
-                while search && alph <= brptMax
-                    
+                while search && (alph <= brptMax) && ...
+                        (toc(self.solveTime) < self.maxRT)
                     % This is a crude extrapolation procedure that
                     % will be replaced in future versions of the code.
-                    
-                    alph = extrapf*alph;
-                    s = solvers.BcflashSolver.gpstep(x, -alph, g, bL, bU);
+                    alph = extrapf * alph;
+                    s = self.gpstep(x, -alph, g);
                     if norm(s) <= delta
-                        wa = Aprod(s);
                         gts = g'*s;
-                        q = 0.5*s'*wa + gts;
+                        q = 0.5*s'*H*s + gts;
                         if q <= self.mu0*gts
                             search = true;
                             alphs = alph;
@@ -325,39 +343,32 @@ classdef BcflashSolver < solvers.NlpSolver
                         search = false;
                     end
                 end
-                
                 % Recover the last successful step.
                 alph = alphs;
-                s = solvers.BcflashSolver.gpstep(x, -alph, g, bL, bU);
+                s = self.gpstep(x, -alph, g);
             end
             
         end % cauchy
         
-        function [x, w] = prsrch(self, Aprod, x, g, w, bL, bU)
-            %PRSRCH  Projected search.
-            %
-            % [x, w] = prsrch(Aprod, x, g, w, bL, bU) where
-            %
-            %     Inputs:
-            %     Aprod is a function handle to compute matrix-vector
+        function s = prsrch(self, H, x, g, w, indFree)
+            %% PRSRCH - Projected search.
+            % s = prsrch(H, x, g, w) where
+            % Inputs:
+            %     H is an opSpot to compute matrix-vector
             %     products
-            %     x        current point
-            %     g        current gradient
-            %     w        search direction
-            %     bL       vector of lower bounds
-            %     bU       vector of upper bounds
-            %     mu0      linesearch parameter
-            %     interpf  interpolation parameter
+            %     x        current point with respect to indFree
+            %     g        current gradient with respect to indFree
+            %     w        search direction with respect to indFree
+            % Output:
+            %     s (the new w) is the step with respect to indFree
             %
-            %     Output:
-            %     x is the final point P[x + alph*w]
-            %     w is the step s[alph]
+            % !!! ALL INPUT/OUTPUT VARIABLES ARE OF REDUCED SIZE !!!
             %
             %     This subroutine uses a projected search to compute a step
             %     that satisfies a sufficient decrease condition for the
             %     quadratic
             %
-            %           q(s) = 0.5*s'*A*s + g'*s,
+            %           q(s) = 0.5*s'*H*s + g'*s,
             %
             %     where A is a symmetric matrix in compressed column
             %     storage, and g is a vector. Given the parameter alph,
@@ -382,32 +393,25 @@ classdef BcflashSolver < solvers.NlpSolver
             % Set the initial alph = 1 because the quadratic function is
             % decreasing in the ray x + alph*w for 0 <= alph <= 1.
             alph = 1;
-            nSteps = 0;
             
             % Find the smallest break-point on the ray x + alph*w.
-            [~, brptMin, ~] = solvers.BcflashSolver.breakpt(x, w, bL, bU);
+            [~, brptMin, ~] = self.breakpt(x, w, indFree);
             
             % Reduce alph until the sufficient decrease condition is
             % satisfied or x + alph*w is feasible.
-            search = true;
-            while search && alph > brptMin
+            while true && (alph > brptMin) && ...
+                    (toc(self.solveTime) < self.maxRT)
                 
                 % Calculate P[x + alph*w] - x and check the sufficient
                 % decrease condition.
-                nSteps = nSteps + 1;
-                s = solvers.BcflashSolver.gpstep(x, alph, w, bL, bU);
-                As = Aprod(s);
+                s = self.gpstep(x, alph, w, indFree);
                 gts = g' * s;
-                q = 0.5 * s' * As + gts;
-                
-                if q <= self.mu0 * gts
-                    search = false;
-                    
+                if 0.5 * s'*H*s + gts <= self.mu0 * gts
+                    break;
                 else
                     % This is a crude interpolation procedure that
                     % will be replaced in future versions of the code.
                     alph = interpf * alph;
-                    
                 end
             end
             
@@ -419,14 +423,11 @@ classdef BcflashSolver < solvers.NlpSolver
                 alph = brptMin;
             end
             % Compute the final iterate and step.
-            s = solvers.BcflashSolver.gpstep(x, alph, w, bL, bU);
-            x = solvers.BcflashSolver.project(x + alph*w, bL, bU);
-            w = s;
+            s = self.gpstep(x, alph, w, indFree); % s = P[x + alph*w] - x
         end % prsrch
         
-        function [x, s, iters, info] = spcg(self, Aprod, x, g, delta, ...
-                rTol, s, iterMax, bL, bU)
-            %SPCG  Minimize a bound-constraint quadratic.
+        function [x, s, info] = spcg(self, H, x, g, delta, s)
+            %% SPCG - Minimize a bound-constraint quadratic
             %
             % This subroutine generates a sequence of approximate
             % minimizers for the subproblem
@@ -435,10 +436,10 @@ classdef BcflashSolver < solvers.NlpSolver
             %
             % The quadratic is defined by
             %
-            %       q(x[0]+s) = 0.5*s'*A*s + g'*s,
+            %       q(x[0]+s) = 0.5*s'*H*s + g'*s,
             %
-            % where x[0] is a base point provided by the user, A is a
-            % symmetric matrix in compressed column storage, and g is a
+            % where x[0] is a base point provided by the user, H is an
+            % opSpot of the hessian, and g is a
             % vector.
             %
             % At each stage we have an approximate minimizer x[k], and
@@ -447,33 +448,30 @@ classdef BcflashSolver < solvers.NlpSolver
             %
             %       min { q(x[k]+p) : || L'*p || <= delta, s(fixed) = 0 },
             %
-            % where fixed is the set of variables fixed at x[k], delta is
-            % the trust region bound, and L is an incomplete Cholesky
-            % factorization of the submatrix
+            % where fixed is the set of variables fixed at x[k] and delta is
+            % the trust region bound. 
             %
-            %       B = A(free:free),
-            %
-            % where free is the set of free variables at x[k]. Given p[k],
-            % the next minimizer x[k+1] is generated by a projected search.
+            % Given p[k], the next minimizer x[k+1] is generated by a 
+            % projected search.
             %
             % The starting point for this subroutine is x[1] = x[0] + s,
             % where x[0] is a base point and s is the Cauchy step.
             %
             % The subroutine converges when the step s satisfies
             %
-            %       || (g + A*s)[free] || <= rTol*|| g[free] ||
+            %       || (g + H*s)[free] || <= rTol*|| g[free] ||
             %
             % In this case the final x is an approximate minimizer in the
             % face defined by the free variables.
             %
             % The subroutine terminates when the trust region bound does
-            % not allow further progress, that is, || L'*p[k] || = delta.
+            % not allow further progress, that is, || p[k] || = delta.
             % In this case the final x satisfies q(x) < q(x[k]).
             %
             % On exit info is set as follows:
             %
             %      info = 1  Convergence. The final step s satisfies
-            %                || (g + A*s)[free] || <= rTol*|| g[free] ||,
+            %                || (g + H*s)[free] || <= rTol*|| g[free] ||,
             %                and the final x is an approximate minimizer
             %                in the face defined by the free variables.
             %
@@ -482,96 +480,149 @@ classdef BcflashSolver < solvers.NlpSolver
             %
             %      info = 3  Failure to converge within iterMax iters.
             
-            n = length(x);
-            
-            % Compute A*(x[1] - x[0]) and store in w.
-            As = Aprod(s);
-            
+            % Compute H*(x[1] - x[0]) and store in w.
+            Hs = H * s;
             % Compute the Cauchy point.
-            x = solvers.BcflashSolver.project(x + s, bL, bU);
+            x = self.project(x + s);
             
             % Start the main iter loop.
             % There are at most n iters because at each iter
             % at least one variable becomes active.
-            iters = 0;
-            for nfaces = 1:n
+            iters = 1;
+            for nfaces = 1:self.nlp.n
                 
                 % Determine the free variables at the current minimizer.
                 % The indices of the free variables are stored in the first
                 % n free positions of the array indFree.
-                indFree = (bL < x) & (x < bU);
-                nFree = sum(indFree);
+                indFree = self.getIndFree(x);
                 
-                % Exit if there are no free constraints.
-                if nFree == 0
+                % Exit if there are no free constraints
+                if ~any(indFree)
                     info = 1;
-                    return
+                    break;
                 end
                 
-                % Compute the gradient grad q(x[k]) = g + A*(x[k] - x[0]),
+                % Compute the gradient grad q(x[k]) = g + H*(x[k] - x[0]),
                 % of q at x[k] for the free variables.
-                % Recall that w contains  A*(x[k] - x[0]).
+                % Recall that w contains  H*(x[k] - x[0]).
                 % Compute the norm of the reduced gradient Z'*g.
                 wa = g(indFree);
-                gFree = As(indFree) + wa;
+                gFree = Hs(indFree) + wa;
                 gfNorm = norm(wa);
                 
                 % Solve the trust region subproblem in the free variables
                 % to generate a direction p[k]. Store p[k] in the array w.
-                tol = rTol*gfNorm;
-                stol = 0;
+                tol = self.cgTol * gfNorm;
                 
-                % Create the submatrix operator.
-                Bprod = @(x)solvers.BcflashSolver.Afree(x, Aprod, ...
-                    indFree, n);
+                Hfree = H(indFree, indFree);
                 
-                L = speye(nFree); % No preconditioner for now.
-                [w, iterTR, infoTR] = ...
-                    solvers.BcflashSolver.trpcg(Bprod, gFree, delta, L, ...
-                    tol, stol, iterMax);
-                
+                [w, iterTR, infoTR] = solvers.BcflashSolver.trpcg( ...
+                    Hfree, gFree, delta, tol, self.maxIterCg);
                 iters = iters + iterTR;
-                w = L' \ w;
                 
                 % Use a projected search to obtain the next iterate.
                 % The projected search algorithm stores s[k] in w.
-                xFree = x(indFree);
-                bLFree = bL(indFree);
-                bUFree = bU(indFree);
-                
-                [xFree, w] = self.prsrch(Bprod, xFree, gFree, w, ...
-                    bLFree, bUFree);
+                w = self.prsrch(Hfree, x(indFree), gFree, w, ...
+                    indFree);
                 
                 % Update the minimizer and the step.
                 % Note that s now contains x[k+1] - x[0].
-                x(indFree) = xFree;
+                x(indFree) = x(indFree) + w;
                 s(indFree) = s(indFree) + w;
                 
                 % Compute A*(x[k+1] - x[0]) and store in w.
-                As = Aprod(s);
+                Hs = H * s;
                 
                 % Compute the gradient grad q(x[k+1]) = g + A*(x[k+1]-x[0])
                 % of q at x[k+1] for the free variables.
-                gFree = As(indFree) + g(indFree);
+                gFree = Hs(indFree) + g(indFree);
                 gfNormF = norm(gFree);
                 
                 % Convergence and termination test.
                 % We terminate if the preconditioned conjugate gradient
                 % method encounters a direction of negative curvature, or
                 % if the step is at the trust region bound.
-                
-                if gfNormF <= rTol * gfNorm
+                if gfNormF <= self.cgTol * gfNorm
                     info = 1;
-                    return
-                elseif infoTR == 3 || infoTR == 4
+                    break;
+                elseif infoTR == 2 || infoTR == 3
                     info = 2;
-                    return
-                elseif iters > iterMax
+                    break;
+                elseif iters > self.maxIterCg
                     info = 3;
-                    return
+                    break;
                 end
+                
             end % faces
+            
+            self.iterCg = self.iterCg + iters;
         end % spcg
+        
+        function [indFree, nFree] = getIndFree(self, x)
+            %% GetIndFree
+            % Find the free variables
+            indFree = (self.nlp.bL < x) & (x < self.nlp.bU);
+            if nargout > 1
+                nFree = sum(indFree);
+            end
+        end
+        
+        function x = project(self, x, ind)
+            %% Project
+            % Project a vector onto the box defined by bL, bU.
+            if nargin == 3
+                x = min(self.nlp.bU(ind), max(x, self.nlp.bL(ind)));
+            else
+                x = min(self.nlp.bU, max(x, self.nlp.bL));
+            end
+        end
+        
+        function s = gpstep(self, x, alph, w, ind)
+            %% GpStep - Compute the gradient projection step.
+            % Compute the gradient projection step
+            %
+            % s = P[x + alph*w] - x,
+            %
+            % where P is the projection onto the box defined by bL, bU.
+            if nargin == 5
+                s = self.project(x + alph * w, ind) - x;
+            else
+                s = self.project(x + alph * w) - x;
+            end
+        end
+        
+        function [nBrpt, brptMin, brptMax] = breakpt(self, x, w, ind)
+            %% BreakPt
+            % This subroutine computes the number of break-points, and
+            % the minimal and maximal break-points of the projection of
+            % x + w on the n-dimensional interval [bL,bU].
+            
+            if nargin == 4
+                bU = self.nlp.bU(ind);
+                bL = self.nlp.bL(ind);
+            else
+                bU = self.nlp.bU;
+                bL = self.nlp.bL;
+            end
+            
+            inc = x < bU & w > 0;     % upper bound intersections
+            dec = x > bL & w < 0;     % lower bound intersections
+            
+            nBrpt = sum(inc | dec);   % number of breakpoints
+            
+            % Quick exit if no breakpoints
+            if nBrpt == 0
+                brptMin = 0;
+                brptMax = 0;
+                return
+            end
+            
+            brptInc = (bU(inc) - x(inc)) ./ w(inc);
+            brptDec = (bL(dec) - x(dec)) ./ w(dec);
+            
+            brptMin = min([brptInc; brptDec; inf]);
+            brptMax = max([brptInc; brptDec; -inf]);
+        end % breakpt
         
     end % private methods
     
@@ -587,40 +638,18 @@ classdef BcflashSolver < solvers.NlpSolver
     
     methods (Access = private, Static)
         
-        function xFree = Afree(xFree, Aprod, indFree, n)
-            z = zeros(n,1);
-            z(indFree) = xFree;
-            z = Aprod(z);
-            xFree = z(indFree);
-        end
-        
-        function [w, iters, info] = trpcg(Aprod, g, delta, L, tol, ...
-                stol, iterMax)
-            %TRPCG
+        function [w, iters, info] = trpcg(H, g, delta, tol, iterMax)
+            %% TRPCG - Trust-region projected conjugate gradient
+            % This subroutine uses a truncated conjugate gradient method to
+            % find an approximate minimizer of the trust-region subproblem
             %
-            % Given a sparse symmetric matrix A in compressed column
-            % storage, this subroutine uses a preconditioned conjugate
-            % gradient method to find an approximate minimizer of the trust
-            % region subproblem
-            %
-            %       min { q(s) : || L'*s || <= delta }.
+            %       min { q(s) : ||s|| <= delta }.
             %
             % where q is the quadratic
             %
-            %       q(s) = 0.5*s'*A*s + g'*s,
+            %       q(s) = 0.5*s'*H*s + g'*s,
             %
-            % A is a symmetric matrix in compressed column storage, L is a
-            % lower triangular matrix in compressed column storage, and g
-            % is a vector.
-            %
-            % This subroutine generates the conjugate gradient iterates for
-            % the equivalent problem
-            %
-            %       min { Q(w) : || w || <= delta }.
-            %
-            % where Q is the quadratic defined by
-            %
-            %       Q(w) = q(s),      w = L'*s.
+            % H is an opSpot of the reduced hessian and g is a vector.
             %
             % Termination occurs if the conjugate gradient iterates leave
             % the trust region, a negative curvature direction is
@@ -631,44 +660,26 @@ classdef BcflashSolver < solvers.NlpSolver
             %
             %       || grad q(s) || <= tol
             %
-            % Convergence in the scaled variables:
-            %
-            %       || grad Q(w) || <= stol
-            %
-            % Note that if w = L'*s, then L*grad Q(w) = grad q(s).
-            %
             % On exit info is set as follows:
             %
             %       info = 1  Convergence in the original variables.
             %                 || grad q(s) || <= tol
             %
-            %       info = 2  Convergence in the scaled variables.
-            %                 || grad Q(w) || <= stol
+            %       info = 2  Negative curvature direction generated.
+            %                 In this case || w || = delta.
             %
-            %       info = 3  Negative curvature direction generated.
-            %                 In this case || w || = delta and a direction
-            %                 of negative curvature w can be recovered by
-            %                 solving L'*w = p.
-            %
-            %       info = 4  Conjugate gradient iterates exit the
+            %       info = 3  Conjugate gradient iterates exit the
             %                 trust region. In this case || w || = delta.
             %
-            %       info = 5  Failure to converge within iterMax iters.
+            %       info = 4  Failure to converge within iterMax iters.
             
             n = length(g);
-            
             % Initialize the iterate w and the residual r.
-            w = zeros(n,1);
-            
-            % Initialize the residual t of grad q to -g.
-            % Initialize the residual r of grad Q by solving L*r = -g.
-            % Note that t = L*r.
-            t = -g;
-            r = L \ -g;
-            
+            w = zeros(n, 1);
+            % Initialize the residual r of grad q to -g.
+            r = -g;
             % Initialize the direction p.
             p = r;
-            
             % Initialize rho and the norms of r and t.
             rho = r'*r;
             rnorm0 = sqrt(rho);
@@ -681,13 +692,8 @@ classdef BcflashSolver < solvers.NlpSolver
             end
             
             for iters = 1:iterMax
-                % Compute z by solving L'*z = p.
-                z = L' \ p;
-                % Compute q by solving L*q = A*z and save L*q for
-                % use in updating the residual t.
-                Az = Aprod(z);
-                z = Az;
-                q = L \ Az;
+                Hp = H * p;
+                q = Hp;
                 % Compute alph and determine sigma such that the TR
                 % constraint || w + sigma*p || = delta is satisfied.
                 ptq = p'*q;
@@ -704,119 +710,35 @@ classdef BcflashSolver < solvers.NlpSolver
                         w = w + sigma*p;
                     end
                     if ptq <= 0
-                        info = 3;
+                        info = 2;
                     else
-                        info = 4;
+                        info = 3;
                     end
-                    
                     return
                 end
-                % Update w and the residuals r and t.
-                % Note that t = L*r.
-                w = w + alph*p;
-                r = r - alph*q;
-                t = t - alph*z;
+                % Update w and the residuals r.
+                w = w + alph * p;
+                r = r - alph * q;
+                
                 % Exit if the residual convergence test is satisfied.
                 rtr = r'*r;
                 rnorm = sqrt(rtr);
-                tnorm = norm(t);
-                if tnorm <= tol
+                if rnorm <= tol
                     info = 1;
                     return
                 end
-                if rnorm <= stol
-                    info = 2;
-                    return
-                end
+                
                 % Compute p = r + betaFact*p and update rho.
                 betaFact = rtr/rho;
                 p = r + betaFact*p;
                 rho = rtr;
             end % for loop
-            iters = itmax;
-            info = 5;
+
+            info = 4;
         end % trpcg
         
-        function x = project(x, bL, bU)
-            %Project  Project a vector onto the box defined by bL, bU.
-            x = max( x, bL );
-            x = min( x, bU );
-        end
-        
-        function s = gpstep(x, alph, w, bL, bU)
-            %GPSTEP  Compute the gradient projection step.
-            %
-            % Compute the gradient projection step
-            %
-            % s = P[x + alph*w] - x,
-            %
-            % where P is the projection onto the box defined by bL, bU.
-            aw = alph*w;
-            s = x + aw;
-            
-            iLow = s < bL;         % violate lower bound
-            iUpp = s > bU;         % violate upper bound
-            iFre = ~(iLow | iUpp); % free
-            
-            s(iLow) = bL(iLow) - x(iLow);
-            s(iUpp) = bU(iUpp) - x(iUpp);
-            s(iFre) = aw(iFre);
-        end
-        
-        function pNorm = gpnrm2(x, bL, bU, g)
-            %% GpNrm2 - Norm-2 of the projected gradient
-            notFixed = bL < bU;
-            low = notFixed & x == bL;
-            upp = notFixed & x == bU;
-            fre = notFixed & ~(low | upp);
-            
-            pNorm1 = norm(g(low & g < 0))^2;
-            pNorm2 = norm(g(upp & g > 0))^2;
-            pNorm3 = norm(g(fre))^2;
-            
-            pNorm = sqrt(pNorm1 + pNorm2 + pNorm3);
-        end
-        
-        function [nBrpt, brptMin, brptMax] = breakpt(x, w, bL, bU)
-            %BREAKPT
-            %     This subroutine computes the number of break-points, and
-            %     the minimal and maximal break-points of the projection of
-            %     x + w on the n-dimensional interval [bL,bU].
-            inc = x < bU & w > 0;     % upper bound intersections
-            dec = x > bL & w < 0;     % lower bound intersections
-            
-            nBrpt = sum(inc | dec);   % number of breakpoints
-            
-            % Quick exit if no breakpoints
-            if nBrpt == 0
-                brptMin = 0;
-                brptMax = 0;
-                return
-            end
-            
-            brptInc = (bU(inc) - x(inc)) ./ w(inc);
-            brptDec = (bL(dec) - x(dec)) ./ w(dec);
-            
-            brptMin =  inf;
-            brptMax = -inf;
-            if any(brptInc)
-                brptMinInc = min(brptInc);
-                brptMin = min(brptMin, brptMinInc);
-                
-                brptMaxInc = max(brptInc);
-                brptMax = max(brptMax, brptMaxInc);
-            end
-            if any(brptDec)
-                brptMinDec = min(brptDec);
-                brptMin = min(brptMin, brptMinDec);
-                
-                brptMaxDec = max(brptDec);
-                brptMax = max(brptMax, brptMaxDec);
-            end
-        end % breakpt
-        
         function sigma = trqsol(x, p, delta)
-            %TRQSOL  Largest solution of the TR equation.
+            %% TRQSOL - Largest solution of the TR equation.
             %     This subroutine computes the largest (non-negative)
             %     solution of the quadratic trust region equation
             %
