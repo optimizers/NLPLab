@@ -37,6 +37,8 @@ classdef LbfgsbSolver < solvers.NlpSolver
         function self = solve(self)
             %% Solve problem represented by nlp model using L-BFGS-B
             
+            self.nlp.resetCounters();
+            
             % Handle that returns nlp's objective value & gradient
             fgFunc = @(x, p) self.objSupp(x, p);
             
@@ -58,16 +60,20 @@ classdef LbfgsbSolver < solvers.NlpSolver
                 self.maxEval, verb, self.postProcessing, ...
                 self.iterGuard, self.startAttempt);
             
+            self.iStop = self.EXIT_OPT_TOL;
             if ~strcmp(stopReason(1:4), 'CONV')
                 warning('Projection sub-problem didn''t converge: %s', ...
                     stopReason);
+                self.iStop = self.EXIT_INNER_FAIL;
             end
             
             % Collecting information from L-BFGS-B's output
             self.fx = fs;
-            self.nObjFunc = nFg;
-            self.nGrad = nFg;
-            self.nHess = 0;
+            % Cumulative counts
+            self.nObjFunc = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
+            self.nGrad = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
+            self.nHess = self.nlp.ncalls_hvp + self.nlp.ncalls_hes;
+            
             self.solveTime = rt;
             self.pgNorm = iterHist(end, 3);
             self.iter = iterHist(end, 1);

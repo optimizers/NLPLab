@@ -26,11 +26,10 @@ classdef CflashSolver < solvers.NlpSolver
     
     
     properties (SetAccess = private, Hidden = false)
-        maxCgIter; % maximum number of CG iterations per Newton step
-        nSuccessIter = 0; % number of successful iterations
-        cgIter = 0; % total number of CG iterations
+        maxIterCg; % maximum number of CG iterations per Newton step
+        nSuccessIter; % number of successful iterations
+        iterCg; % total number of CG iterations
         gNorm0; % norm of the gradient at x0
-        exitMsg; % string indicating exit
         eqTol; % Tolerance for equalities (see indFree)
         nProj; % # of projections
         maxProj; % maximal # of projections
@@ -39,7 +38,9 @@ classdef CflashSolver < solvers.NlpSolver
         fMin;
         fid; % File ID of where to direct log output
         
+        iterExtra;
         stats;
+        useBb;
     end
     
     properties (Hidden = true, Constant)
@@ -53,17 +54,12 @@ classdef CflashSolver < solvers.NlpSolver
         eta2 = 0.75;
         
         % Log header and body formats.
-        LOG_HEADER_FORMAT = '\n%5s  %13s  %13s  %9s %5s  %9s  %9s %9s\n';
-        LOG_BODY_FORMAT = ['%5i  %13.6e  %13.6e  %9d %5i  %9.3e', ...
-            '  %9.3e  %3s  %d\n'];
+        LOG_HEADER_FORMAT = ['\n%5s  %13s  %13s  %9s  %5s  %9s  %9s', ...
+            '  %9s  %6s  %6s\n'];
+        LOG_BODY_FORMAT = ['%5d  %13.6e  %13.6e  %9d  %5d  %9d', ...
+            '  %9.3e  %9.3e  %3s  %6d\n'];
         LOG_HEADER = {'iter', 'f(x)', '|g(x)|', '# Proj', 'cg', ...
-            'preRed', 'radius', '#free'};
-        
-        % TRPCG header and body formats
-        % trpcg_header = sprintf('\t%-5s  %9s  %8s  %8s', 'Iter', ...
-        %    '||r''*g||', 'curv', '||(Cp)_i||');
-        % trpcg_fmt = '\t%-5d  %9.2e  %8.2e  %8.2e';
-        
+            'iterExtra', 'preRed', 'radius', 'status', '#free'};
     end % constant properties
     
     
@@ -94,13 +90,14 @@ classdef CflashSolver < solvers.NlpSolver
             p = inputParser;
             p.KeepUnmatched = true;
             p.PartialMatching = false;
-            p.addParameter('maxCgIter', length(nlp.x0));
+            p.addParameter('maxIterCg', length(nlp.x0));
             p.addParameter('cgTol', 0.1);
             p.addParameter('fMin', -1e32);
             p.addParameter('mu0', 0.01);
             p.addParameter('fid', 1);
             p.addParameter('eqTol', 1e-6);
             p.addParameter('maxProj', 1e5);
+            p.addParameter('useBb', false);
             
             p.parse(varargin{:});
             
@@ -108,20 +105,42 @@ classdef CflashSolver < solvers.NlpSolver
             
             % Store various objects and parameters.
             self.cgTol = p.Results.cgTol;
-            self.maxCgIter = p.Results.maxCgIter;
+            self.maxIterCg = p.Results.maxIterCg;
             self.fMin = p.Results.fMin;
             self.mu0 = p.Results.mu0;
             self.fid = p.Results.fid;
             self.eqTol = p.Results.eqTol;
             self.maxProj = p.Results.maxProj;
+            self.useBb = p.Results.useBb;
             
             import utils.PrintInfo;
+            
+            self.stats.proj = struct;
+            self.stats.proj.info = [];
+            self.stats.proj.infoHeader = ...
+                {'nProj', 'iter', 'nObjFunc', 'nGrad', 'nHess', ...
+                'pgNorm', 'solveTime'};
+            self.stats.proj.exit = {};
+            
+            self.stats.rec = struct;
+            self.stats.rec.info = [];
+            self.stats.rec.infoHeader = ...
+                {'iter', 'nObjFunc', 'nGrad', 'nHess', 'nProj', ...
+                'innerIter', 'pgNorm', 'solveTime'};
+            self.stats.rec.exit = {};
         end % constructor
         
         function self = solve(self)
             %% Solve
+            
             self.solveTime = tic;
-            self.iter = 0;
+            self.iter = 1;
+            self.iterCg = 1;
+            self.nSuccessIter = 0;
+            self.iStop = self.EXIT_NONE;
+            self.nProj = 0;
+            self.iterExtra = 1;
+            self.nlp.resetCounters();
             
             printObj = utils.PrintInfo('Cflash');
             
@@ -131,10 +150,12 @@ classdef CflashSolver < solvers.NlpSolver
                     {self.fMin, self.cgTol, self.mu0, self.maxProj, ...
                     self.eqTol});
                 printObj.header(self, extra);
+                self.printf(self.LOG_HEADER_FORMAT, self.LOG_HEADER{:});
             end
             
             % Make sure initial point is feasible
             x = self.project(self.nlp.x0);
+            
             % First objective and gradient evaluation.
             [f, g] = self.nlp.obj(x);
             
@@ -152,148 +173,102 @@ classdef CflashSolver < solvers.NlpSolver
             
             % Miscellaneous iter
             alphc = 1;
-            iterCg = 0;
-            sigma1 = self.sig1;
-            sigma2 = self.sig2;
-            sigma3 = self.sig3;
-            self.iStop = self.EXIT_NONE;
-            self.nProj = 0;
+            status = '';
             
             %% Main loop
-            while true
+            while ~self.iStop
                 % Check stopping conditions
-                [~, nFree] = self.indFree(x);
+                [~, nFree] = self.getIndFree(x);
                 pgNorm = norm(self.gpstep(x, -1, g));
                 
-                exit = pgNorm <= self.rOptTol + self.aOptTol;
-                if ~self.iStop && exit
+                if pgNorm <= self.rOptTol + self.aOptTol
                     self.iStop = self.EXIT_OPT_TOL;
-                end
-                
-                exit = f < self.fMin;
-                if ~self.iStop && exit
+                elseif f < self.fMin
                     self.iStop = self.EXIT_UNBOUNDED;
-                end
-                
-                exit = abs(actRed) <= self.aFeasTol && ...
-                    preRed  <= self.aFeasTol;
-                if ~self.iStop && exit
+                elseif (abs(actRed) <= (self.aFeasTol + self.rFeasTol)) ...
+                        && (preRed  <= (self.aFeasTol + self.rFeasTol))
                     self.iStop = self.EXIT_FEAS_TOL;
-                end
-                
-                exit = abs(actRed) <= self.rFeasTol && ...
-                    preRed  <= self.rFeasTol;
-                if ~self.iStop && exit
-                    self.iStop = self.EXIT_FEAS_TOL;
-                end
-                
-                exit = self.iter >= self.maxIter;
-                if ~self.iStop && exit
+                elseif self.iter >= self.maxIter
                     self.iStop = self.EXIT_MAX_ITER;
-                end
-                
-                exit = self.nProj >= self.maxProj;
-                if ~self.iStop && exit
+                elseif self.nProj >= self.maxProj
                     self.iStop = self.EXIT_MAX_PROJ;
-                end
-                
-                exit = toc(self.solveTime) >= self.maxRT;
-                if ~self.iStop && exit
+                elseif toc(self.solveTime) >= self.maxRT
                     self.iStop = self.EXIT_MAX_RT;
                 end
                 
                 % Print current iter to log
                 if self.verbose >= 2
-                    if mod(self.iter, 20) == 0
-                        fprintf(self.LOG_HEADER_FORMAT, ...
-                            self.LOG_HEADER{:});
-                        %                         self.logger.info(sprintf(self.LOG_HEADER_FORMAT, self.LOG_HEADER{:}));
-                    end
-                    if self.iter == 0 || successful
-                        status = '';
-                    else
-                        status = 'rej';
-                    end
                     self.printf(self.LOG_BODY_FORMAT, self.iter, f, ...
-                        pgNorm, self.nProj, iterCg, preRed, delta, ...
-                        status, nFree);
-                    %                     self.logger.info(sprintf(self.LOG_BODY_FORMAT, self.iter, ...
-                    %                         f, pgNorm, iterCg, preRed, delta, status, ...
-                    %                         nFree));
+                        pgNorm, self.nProj, self.iterCg, ...
+                        self.iterExtra, preRed, delta, status, nFree);
                 end
+                
+                self.nObjFunc = self.nlp.ncalls_fobj + ...
+                    self.nlp.ncalls_fcon;
+                self.nGrad = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
+                self.nHess = self.nlp.ncalls_hvp + self.nlp.ncalls_hes;
+                
+                self.stats.rec.info = [self.stats.rec.info; ...
+                    [self.iter, self.nObjFunc, self.nGrad, self.nHess, ...
+                    self.nProj, self.iterCg, pgNorm, toc(self.solveTime)]];
                 
                 % Act on exit conditions
                 if self.iStop
-                    self.exitMsg = self.EXIT_MSG{self.iStop};
                     self.x = x;
                     self.fx = f;
                     self.pgNorm = pgNorm;
                     break
                 end
                 
-                %% Iteration starts here
-                self.iter = self.iter + 1;
                 fc = f;
                 xc = x;
                 
-                % Hessian operator.
-                Aprod = @(v)self.nlp.hobjprod(x,zeros(0,1),v);
+                % Hessian operator
+                H = self.nlp.hobj(x);
                 
-                [alphc, s] = self.cauchy(Aprod, x, g, delta, alphc);
+                % Cauchy step
+                [alphc, s] = self.cauchy(H, x, g, delta, alphc);
                 
-                % Projected Newton step.
-                [x, s, iterCg, ~] = self.spcg(Aprod, x, g, delta, ...
-                    self.cgTol, s, self.maxCgIter);
-                self.cgIter = self.cgIter + iterCg;
+                % Projected Newton step
+                [x, s, ~] = self.spcg(H, x, g, delta, s);
                 
                 % Predicted reduction.
-                As = self.nlp.hobjprod(x, zeros(0,1), s);
-                preRed = -(s' * g + 0.5 * s' * As);
+                Hs = self.nlp.hobjprod(x, [], s);
+                preRed = -(s' * g + 0.5 * s' * Hs);
                 
                 % Compute the objective at this new point.
                 f = self.nlp.fobj(x);
                 actRed = fc - f;
-                snorm = norm(s);
                 
-                % Update the trust-region radius.
-                if self.nSuccessIter == 0
-                    delta = min(delta, snorm);
-                end
-                gts = g' * s;
-                if f - fc - gts <= 0
-                    alph = sigma3;
-                else
-                    alph = max(sigma1, -0.5 * gts / (f - fc - gts));
-                end
+                % Update the trust-region radius
+                delta = self.updateDelta(f, fc, g, s, actRed, preRed, ...
+                    delta);
                 
-                % Changing delta according to a set of rules:
-                if actRed < self.eta0 * preRed || actRed == -inf;
-                    delta = min(max(alph, sigma1) * snorm, ...
-                        sigma2 * delta);
-                elseif actRed < self.eta1 * preRed
-                    delta = max(sigma1 * delta, min(alph * snorm, ...
-                        sigma2 * delta));
-                elseif actRed < self.eta2 * preRed
-                    delta = max(sigma1 * delta, min(alph * snorm, ...
-                        sigma3 * delta));
-                else
-                    delta = max(delta, min(alph * snorm, sigma3 * delta));
-                end
-                
+                % Accept or reject step
                 if actRed > self.eta0 * preRed;
-                    successful = true;
+                    % Successful step
+                    status = '';
+                    self.nSuccessIter = self.nSuccessIter + 1;
+                    if self.useBb
+                        % Can only use Bb step if iteration is successful
+                        gOld = g;
+                        % Update the gradient value
+                        g = self.nlp.gobj(x);
+                        % Update initial alphc used in Cauchy
+                        alphc = self.bbStepLength(xc, x, gOld, g);
+                    else
+                        % Update the gradient value
+                        g = self.nlp.gobj(x);
+                    end
                 else
                     % The step is rejected
-                    successful = false;
-                end
-                if successful
-                    self.nSuccessIter = self.nSuccessIter + 1;
-                    % Update the gradient value
-                    g = self.nlp.gobj(x);
-                else
+                    status = 'rej';
+                    % Fallback on previous values
                     f = fc;
                     x = xc;
                 end
+                
+                self.iter = self.iter + 1;
             end % main loop
             
             self.nObjFunc = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
@@ -306,12 +281,44 @@ classdef CflashSolver < solvers.NlpSolver
             self.isSolved();
             
             printObj.footer(self);
+            
+            self.stats.rec.exit{end + 1} = self.EXIT_MSG{self.iStop};
         end % solve
         
     end % public methods
     
     
     methods (Access = private)
+        
+        function alph = bbStepLength(self, xOld, x, gOld, g)
+            %% BBStepLength - Compute Barzilai-Borwein step length
+            % alph_BB = (s' * s) / (s' * y)
+            s = x - xOld;
+            % Denominator of Barzilai-Borwein step length
+            betaBB = s' * (g - gOld);
+            
+            % Find the minimal and maximal break-point on x - alph*g.
+            [~, alphMin, alphMax] = self.breakpt(x, -g);
+            % Safeguard
+            if isinf(alphMax)
+                alphMax = 1e3;
+            end
+            if isinf(alphMin)
+                alphMin = 1e-3;
+            end
+            
+            if betaBB < 0
+                % Fall back to maximal step length
+                alph = alphMax;
+            else
+                % Compute Barzilai-Borwein step length
+                % y = g - gOld
+                % alph_BB = (s' * s) / (s' * y)
+                % Assert alph \in [alph_min, alph_max]
+                alph = min(alphMax, ...
+                    max(alphMin, (s' * s) / betaBB));
+            end
+        end % bbsteplength
         
         function xProj = project(self, x)
             %% Project - simple wrapper to increment nProj counter
@@ -320,6 +327,19 @@ classdef CflashSolver < solvers.NlpSolver
                 % Propagate throughout the program to exit
                 self.iStop = self.EXIT_PROJ_FAILURE;
             end
+            
+            % This can be removed later
+            if isprop(self.nlp, 'projSolver')
+                solver = self.nlp.projSolver;
+                % Collecting statistics
+                self.stats.proj.info = [self.stats.proj.info; ...
+                    [self.nProj, solver.iter, solver.nObjFunc, ...
+                    solver.nGrad, solver.nHess, solver.pgNorm, ...
+                    solver.solveTime]];
+                self.stats.proj.exit{end + 1} = ...
+                    solver.EXIT_MSG{solver.iStop};
+            end
+            
             self.nProj = self.nProj + 1;
         end
         
@@ -329,15 +349,46 @@ classdef CflashSolver < solvers.NlpSolver
             self.nProj = self.nProj + 1;
         end
         
-        function [alph, s] = cauchy(self, Aprod, x, g, delta, alph)
-            %% CAUCHY
-            %
+        function delta = updateDelta(self, f, fc, g, s, actRed, preRed, ...
+                delta)
+            %% UpdateDelta
+            % Update trust-region radius according to a set of rules.
+            
+            snorm = norm(s);
+            if self.nSuccessIter == 0
+                delta = min(delta, snorm);
+            end
+            
+            gts = g' * s;
+            if f - fc - gts <= 0
+                alph = self.sig3;
+            else
+                alph = max(self.sig1, -0.5 * gts / (f - fc - gts));
+            end
+            
+            % Changing delta according to a set of rules:
+            if actRed < self.eta0 * preRed || actRed == -inf;
+                delta = min(max(alph, self.sig1) * snorm, ...
+                    self.sig2 * delta);
+            elseif actRed < self.eta1 * preRed
+                delta = max(self.sig1 * delta, min(alph * snorm, ...
+                    self.sig2 * delta));
+            elseif actRed < self.eta2 * preRed
+                delta = max(self.sig1 * delta, min(alph * snorm, ...
+                    self.sig3 * delta));
+            else
+                delta = max(delta, min(alph * snorm, self.sig3 * delta));
+            end
+        end
+        
+        function [alph, s] = cauchy(self, H, x, g, delta, alph)
+            %% Cauchy
             % This subroutine computes a Cauchy step that satisfies a trust
             % region constraint and a sufficient decrease condition.
             %
             % The Cauchy step is computed for the quadratic
             %
-            %       q(s) = 0.5*s'*A*s + g'*s,
+            %       q(s) = 0.5*s'*H*s + g'*s,
             %
             % where A is a symmetric matrix in compressed row storage, and
             % g is a vector. Given a parameter alph, the Cauchy step is
@@ -351,6 +402,7 @@ classdef CflashSolver < solvers.NlpSolver
             %       || s || <= delta,      q(s) <= mu_0*(g'*s),
             %
             % where mu_0 is a constant in (0,1).
+            
             self.logger.debug('-- Entering Cauchy --');
             self.logger.debug(sprintf('α = %7.1e, δ = %7.3e', ...
                 alph, delta));
@@ -369,9 +421,8 @@ classdef CflashSolver < solvers.NlpSolver
             if sNorm >= delta
                 interp = true;
             else
-                wa = Aprod(s);
-                gts = g' * s;
-                q = 0.5 * s' * wa + gts;
+                gts = g'*s;
+                q = 0.5 * s'*H*s + gts;
                 interp = (q >= self.mu0 * gts);
             end
             
@@ -380,37 +431,37 @@ classdef CflashSolver < solvers.NlpSolver
                 self.logger.debug('Interpolating');
                 % Reduce alph until a successful step is found.
                 search = true;
-                while search && toc(self.solveTime) < self.maxRT
+                while search && (toc(self.solveTime) < self.maxRT)
                     % This is a crude interpolation procedure that
                     % will be replaced in future versions of the code.
                     alph = interpf * alph;
                     s = self.gpstep(x, -alph, g);
+                    self.iterExtra = self.iterExtra + 1;
                     sNorm = norm(s);
                     self.logger.debug(sprintf('\t||s|| = %7.3e', sNorm));
                     if sNorm <= delta
-                        wa = Aprod(s);
-                        gts = g' * s;
-                        q = 0.5 * s' * wa + gts;
+                        gts = g'*s;
+                        q = 0.5 * s'*H*s + gts;
                         search = (q >= self.mu0 * gts);
                     end
                 end
-            else
+            else % Extrapolate
                 self.logger.debug('Extrapolating');
                 % Increase alph until a successful step is found.
                 search = true;
                 alphas = alph;
-                while search && alph <= brptMax && ... 
-                        toc(self.solveTime) < self.maxRT
+                while search && (alph <= brptMax) && ...
+                        (toc(self.solveTime) < self.maxRT)
                     % This is a crude extrapolation procedure that
                     % will be replaced in future versions of the code.
                     alph = extrapf * alph;
                     s = self.gpstep(x, -alph, g);
+                    self.iterExtra = self.iterExtra + 1;
                     sNorm = norm(s);
                     self.logger.debug(sprintf('\t||s|| = %7.3e', sNorm));
                     if sNorm <= delta
-                        wa = Aprod(s);
                         gts = g' * s;
-                        q = 0.5 * s' * wa + gts;
+                        q = 0.5 * s'*H*s + gts;
                         if q <= self.mu0 * gts
                             search = true;
                             alphas = alph;
@@ -426,31 +477,25 @@ classdef CflashSolver < solvers.NlpSolver
             self.logger.debug(sprintf('Leaving Cauchy, α = %7.1e', alph));
         end % cauchy
         
-        function [x, w] = prsrch(self, Aprod, x, g, w)
-            %% PRSRCH  Projected search.
-            %
-            % [x, w] = prsrch(Aprod, x, g, w) where
-            %
-            %     Inputs:
-            %     Aprod is a function handle to compute matrix-vector
+        function s = prsrch(self, H, x, g, w)
+            %% PrSrch - Projected search
+            % s = prsrch(H, x, g, w) where
+            % Inputs:
+            %     H is an opSpot to compute matrix-vector
             %     products
             %     x        current point
             %     g        current gradient
             %     w        search direction
-            %     mu0      linesearch parameter
-            %     interpf  interpolation parameter
-            %
-            %     Output:
-            %     x is the final point P[x + alph*w]
-            %     w is the step s[alph]
+            % Output:
+            %     s is the step s[alph]
             %
             %   This subroutine uses a projected search to compute a step
             %   that satisfies a sufficient decrease condition for the
             %   quadratic
             %
-            %           q(s) = 0.5*s'*A*s + g'*s,
+            %           q(s) = 0.5*s'*H*s + g'*s,
             %
-            %   where A is a symmetric matrix in compressed column
+            %   where H is a symmetric matrix in compressed column
             %   storage, and g is a vector. Given the parameter alph,
             %   the step is
             %
@@ -467,13 +512,12 @@ classdef CflashSolver < solvers.NlpSolver
             %   The search direction w must be a descent direction for the
             %   quadratic q at x such that the quadratic is decreasing
             %   in the ray  x + alph*w for 0 <= alph <= 1.
+            
             self.logger.debug('-- Entering prsrch --');
             interpf = 0.5; % Interpolation factor
-            
             % Set the initial alph = 1 because the quadratic function is
             % decreasing in the ray x + alph*w for 0 <= alph <= 1.
             alph = 1;
-            nSteps = 0;
             
             % Find the smallest break-point on the ray x + alph*w.
             [~, brptMin, ~] = self.breakpt(x, w);
@@ -481,20 +525,18 @@ classdef CflashSolver < solvers.NlpSolver
             
             % Reduce alph until the sufficient decrease condition is
             % satisfied or x + alph*w is feasible.
-            search = true;
             self.logger.debug('Interpolating');
-            while search && alph > brptMin && ...
-                    toc(self.solveTime) < self.maxRT
+            while true && (alph > brptMin) && ...
+                    (toc(self.solveTime) < self.maxRT)
+                
                 % Calculate P[x + alph*w] - x and check the sufficient
                 % decrease condition.
-                nSteps = nSteps + 1;
                 s = self.gpstep(x, alph, w);
+                self.iterExtra = self.iterExtra + 1;
                 self.logger.debug(sprintf('\t||s|| = %7.3e', norm(s)));
-                As = Aprod(s);
                 gts = g' * s;
-                q = 0.5 * s' * As + gts;
-                if q <= self.mu0 * gts
-                    search = false;
+                if 0.5 * s'*H*s + gts <= self.mu0 * gts
+                    break;
                 else
                     % This is a crude interpolation procedure that
                     % will be replaced in future versions of the code.
@@ -511,14 +553,11 @@ classdef CflashSolver < solvers.NlpSolver
             end
             
             % Compute the final iterate and step.
-            s = self.gpstep(x, alph, w);
-            x = self.project(x + alph * w);
-            w = s;
+            s = self.gpstep(x, alph, w); % s = P[x + alph * w] - x
         end % prsrch
         
-        function [x, s, iters, info] = spcg(self, Aprod, x, g, delta, ...
-                rtol, s, iterMax)
-            %% SPCG  Minimize a linearly constrained quadratic.
+        function [x, s, info] = spcg(self, H, x, g, delta, s)
+            %% SPCG - Minimize a linearly constrained quadratic.
             %
             % This subroutine generates a sequence of approximate
             % minimizers for the subproblem
@@ -527,10 +566,10 @@ classdef CflashSolver < solvers.NlpSolver
             %
             % The quadratic is defined by
             %
-            %       q(x[0]+s) = 0.5*s'*A*s + g'*s,
+            %       q(x[0]+s) = 0.5*s'*H*s + g'*s,
             %
-            % where x[0] is a base point provided by the user, A is a
-            % symmetric matrix in compressed column storage, and g is a
+            % where x[0] is a base point provided by the user, H is an
+            % opSpot of the hessian, and g is a
             % vector.
             %
             % At each stage we have an approximate minimizer x[k], and
@@ -549,7 +588,7 @@ classdef CflashSolver < solvers.NlpSolver
             %
             % The subroutine converges when the step s satisfies
             %
-            %       || (g + A*s)[free] || <= rtol*|| g[free] ||
+            %       || (g + H*s)[free] || <= rtol*|| g[free] ||
             %
             % In this case the final x is an approximate minimizer in the
             % face defined by the free variables.
@@ -561,7 +600,7 @@ classdef CflashSolver < solvers.NlpSolver
             % On exit info is set as follows:
             %
             %      info = 1  Convergence. The final step s satisfies
-            %                || (g + A*s)[free] || <= rtol*|| g[free] ||,
+            %                || (g + H*s)[free] || <= rtol*|| g[free] ||,
             %                and the final x is an approximate minimizer
             %                in the face defined by the free variables.
             %
@@ -569,84 +608,87 @@ classdef CflashSolver < solvers.NlpSolver
             %                not allow further progress.
             %
             %      info = 3  Failure to converge within iterMax iterations.
+            
             self.logger.debug('-- Entering SPCG --');
-            
-            % Compute A*(x[1] - x[0]) and store in w.
-            As = Aprod(s);
-            
+            % Compute H*(x[1] - x[0]) and store in w.
+            Hs = H * s;
+            % Norm of obj. func. gradient is a stopping criteria
+            gNorm = norm(g);
             % Compute the Cauchy point.
             x = self.project(x + s);
             
             % Start the main iter loop.
             % There are at most n iterations because at each iter
             % at least one variable becomes active.
-            iters = 0;
-            for nFaces = 1:self.nlp.n
-                % Determine the free variables at the current minimizer.
-                [indFree, ~] = self.indFree(x);
+            iters = 1;
+            for nFaces = 1 : self.nlp.n
                 
-                % Compute the gradient grad q(x[k]) = g + A*(x[k] - x[0]),
-                gfNorm = norm(g);
-                gfobj = As + g;
+                % Determine the free variables at the current minimizer.
+                indFree = self.getIndFree(x);
+                
+                % Exit if there are no free constraints
+                if ~any(indFree)
+                    info = 1;
+                    break;
+                end
+                
+                % Compute the grad of quad q(x[k]) = g + H*(x[k] - x[0]),
+                gQuad = Hs + g;
                 
                 % Solve the trust region subproblem in the free variables
                 % to generate a direction p[k]. Store p[k] in the array w.
-                tol = rtol*gfNorm;
-                
-                [w, iterTR, infotr] = self.trpcg(Aprod, gfobj, delta, ...
-                    tol, iterMax, indFree);
+                tol = self.cgTol * gNorm;
+                [w, iterTR, infotr] = self.trpcg(H, gQuad, delta, ...
+                    tol, self.maxIterCg, indFree);
                 
                 iters = iters + iterTR;
                 
                 % Use a projected search to obtain the next iterate.
                 % The projected search algorithm stores s[k] in w.
-                [x, w] = self.prsrch(Aprod, x, gfobj, w);
+                w = self.prsrch(H, x, gQuad, w);
                 
                 % Update the minimizer and the step.
                 % Note that s now contains x[k+1] - x[0].
+                x = x + w;
                 s = s + w;
                 
-                % Compute A*(x[k+1] - x[0]) and store in w.
-                As = Aprod(s);
-                
-                % Compute the gradient grad
-                % q(x[k+1]) = g + A*(x[k+1] - x[0])
-                % of q at x[k+1] for the free variables.
-                gfobj = As + g;
-                gfnormf = norm(gfobj);
+                % Compute H*(x[k+1] - x[0]) and store in w.
+                Hs = H * s;
                 
                 % Convergence and termination test.
                 % We terminate if the preconditioned conjugate gradient
                 % method encounters a direction of negative curvature, or
                 % if the step is at the trust region bound.
-                if gfnormf <= rtol * gfNorm
+                if norm(Hs + g) <= self.cgTol * gNorm
                     info = 1;
                     self.logger.debug(sprintf( ...
                         ['Leaving SPCG, info = %d', ' (conv)'], info));
-                    return
-                elseif infotr == 3 || infotr == 4
+                    break;
+                elseif infotr == 2 || infotr == 3
                     info = 2;
-                    self.logger.debug(sprintf( ... 
+                    self.logger.debug(sprintf( ...
                         ['Leaving SPCG, info = %d', ' (TR)'], info));
-                    return
-                elseif iters > iterMax
+                    break;
+                elseif iters > self.maxIterCg
                     info = 3;
                     self.logger.debug(sprintf( ...
                         ['Leaving SPCG, info = %d', ' (fail)'], info));
-                    return
+                    break;
                 end
             end % faces
+            
+            self.iterCg = self.iterCg + iters;
         end % spcg
         
         function s = gpstep(self, x, alph, w)
-            %% GPStep - Compute the gradient projection step.
+            %% GpStep - Compute the gradient projection step.
             % s = P[x + alph*w] - x,
             % where P is the projection onto the linear constraint set
             s = self.project(x + alph*w) - x;
         end
         
-        function [indFree, nFree] = indFree(self, x)
-            %% Indfree - Find indices of the free variables
+        function [indFree, nFree] = getIndFree(self, x)
+            %% GetIndFree - Find indices of the free variables
             % Assuming linear constraints
             % cL <= C*x <= cU
             % where C is the jacobian of the linear constraints
@@ -657,16 +699,16 @@ classdef CflashSolver < solvers.NlpSolver
             % to happen in practice
             indFree = (self.nlp.cU - Cx >= appZero) & ...
                 (Cx - self.nlp.cL >= appZero);
-            nFree = sum(indFree);
+            if nargout > 1
+                nFree = sum(indFree);
+            end
         end
         
-        function [w, iters, info] = trpcg(self, Aprod, g, delta, ...
+        function [w, iters, info] = trpcg(self, H, g, delta, ...
                 tol, iterMax, indFree)
             %% TRPCG
-            % Given a sparse symmetric matrix A in compressed column
-            % storage, this subroutine uses a projected conjugate gradient
-            % method to find an approximate minimizer of the trust region
-            % subproblem
+            % This subroutine uses a truncated conjugate gradient method to
+            % find an approximate minimizer of the trust-region subproblem
             %
             %       min_s   q(s)
             %       sc      || s || <= delta
@@ -674,7 +716,7 @@ classdef CflashSolver < solvers.NlpSolver
             %
             % where q is the quadratic
             %
-            %       q(s) = 0.5*s'*A*s + g'*s,
+            %       q(s) = 0.5*s'*H*s + g'*s,
             %
             % Termination occurs if the conjugate gradient iterates leave
             % the trust region, a negative curvature direction is generated
@@ -689,18 +731,13 @@ classdef CflashSolver < solvers.NlpSolver
             %       info = 1  Convergence in the original variables.
             %                 || grad q(s) || <= tol
             %
-            %       info = 2  Convergence in the original variables.
-            %                 || grad q(s) || <= tol
+            %       info = 2  Negative curvature direction generated.
+            %                 In this case || w || = delta.
             %
-            %       info = 3  Negative curvature direction generated.
-            %                 In this case || w || = delta and a direction
-            %                 of negative curvature w can be recovered by
-            %                 solving L'*w = p.
-            %
-            %       info = 4  Conjugate gradient iterates exit the
+            %       info = 3  Conjugate gradient iterates exit the
             %                 trust region. In this case || w || = delta.
             %
-            %       info = 5  Failure to converge within iterMax iterations
+            %       info = 4  Failure to converge within iterMax iterations
             
             self.logger.debug('-- Entering TRPCG --');
             self.logger.debug(sprintf( ...
@@ -740,7 +777,7 @@ classdef CflashSolver < solvers.NlpSolver
                 
                 % Compute alph and determine sigma such that the trust
                 % region constraint || w + sigma*p || = delta is satisfied.
-                q = Aprod(p);
+                q = H * p;
                 ptq = p'*q;
                 self.logger.debug(sprintf('\tp''*H*p = %7.3e', ptq));
                 if ptq > 0
@@ -759,12 +796,12 @@ classdef CflashSolver < solvers.NlpSolver
                         w = w + sigma*p;
                     end
                     if ptq <= 0
-                        info = 3;
+                        info = 2;
                         self.logger.debug(sprintf( ...
                             ['Leaving TRPCG, info', ...
                             ' = %d (negative curv)'], info));
                     else
-                        info = 4;
+                        info = 3;
                         self.logger.debug(sprintf( ...
                             ['Leaving TRPCG, info', ...
                             ' = %d (exit TR)'], info));
@@ -791,14 +828,13 @@ classdef CflashSolver < solvers.NlpSolver
                 rho = rtr;
             end % for loop
             
-            iters = iterMax;
-            info = 5;
+            info = 4;
             self.logger.debug(sprintf( ...
                 'Leaving TRPCG, info = %d (fail)', info));
         end % trpcg
         
         function [nBrpt, brptMin, brptMax] = breakpt(self, x, w)
-            %% Breakpt
+            %% BreakPt
             % Find the breakpoints on the constraint set
             %                   cL <= C*x <= cU
             % from x in the direction w, i.e. finding alphas such as
@@ -816,10 +852,10 @@ classdef CflashSolver < solvers.NlpSolver
             
             % Redefining iLow & iUpp (lower & upper indices of bounded
             % constraints) as positions instead of logical
-            iLow = find(self.nlp.iLow == true);
-            iUpp = find(self.nlp.iUpp == true);
-            %             iLow = 1:self.nlp.n;
-            %             iUpp = iLow;
+%             iLow = find(self.nlp.iLow);
+%             iUpp = find(self.nlp.iUpp);
+            iLow = 1:self.nlp.n;
+            iUpp = iLow;
             
             % Lower constraint intersections: Ax - cL > 0 & Aw < 0
             dec = (Cx(iLow) - self.nlp.cL(iLow) >= appZero) & Cw(iLow) < 0;
@@ -841,24 +877,8 @@ classdef CflashSolver < solvers.NlpSolver
             brptDec = (self.nlp.cL(dec) - Cx(dec)) ./ Cw(dec);
             brptInc = (self.nlp.cU(inc) - Cx(inc)) ./ Cw(inc);
             
-            % Finding min & max breakpoint
-            brptMin =  inf;
-            brptMax = -inf;
-            
-            if any(brptDec)
-                brptMinDec = min(brptDec);
-                brptMin = min(brptMin, brptMinDec);
-                
-                brptMaxDec = max(brptDec);
-                brptMax = max(brptMax, brptMaxDec);
-            end
-            if any(brptInc)
-                brptMinInc = min(brptInc);
-                brptMin = min(brptMin, brptMinInc);
-                
-                brptMaxInc = max(brptInc);
-                brptMax = max(brptMax, brptMaxInc);
-            end
+            brptMin = min([brptInc; brptDec; inf]);
+            brptMax = max([brptInc; brptDec; -inf]);
         end % breakpt
         
     end % private methods

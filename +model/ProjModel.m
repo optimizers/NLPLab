@@ -164,6 +164,58 @@ classdef ProjModel < model.LeastSquaresModel
             wProj = d + (subA' * z);
         end
         
+        function z = hessPrecBCCB(self, ind, v)
+            %% HessPrecProd
+            % This function returns the product of
+            %   diag(B * C * C' * B')⁻¹ * v
+            % as a preconditionner to the hessian of the projection
+            % sub-problem C * C'.
+            % Inputs:
+            %   - ind: logical array representing the restriction matrix B
+            %   - v: arbitrary vector that is already of reduced size
+            % Output:
+            %   - z: product of preconditionner times v
+
+            % Converting logical to positions
+            ind = find(ind);
+            
+            % r & c hold the row and column to which each ind correspond in
+            % block form (block size, # blocks)
+            [r, c] = ind2sub([self.prec.BlkSiz, self.prec.Nblks], ind);
+            
+            % Since C * C' is block-circulant, in the worst case, we need
+            % to form one full block to obtain the complete diagonal of 
+            % C * C'. Therefore, we can remove duplicates.
+            [r, ~, iR] = unique(r);
+            nR = length(r);
+            
+            % Initialize the diagonal
+            dC = zeros(nR, 1);
+            for ii = 1 : nR
+                % For each r, create a row of B
+                p = zeros(1, self.prec.Nblks);
+                p(c(ii)) = 1;
+                
+                % (B * F' * D² * F * B)_ith row of block form
+                temp = ifft( ... 
+                    self.prec.Mdiag(r(ii) : self.prec.BlkSiz : end).^2 ...
+                    .* fft(p, [], 2), [], 2);
+                
+                % Only extract the diagonal value of the block products
+                dC(ii) = temp(c(ii));
+            end
+            
+            % Inverting single block before expanding
+            dC = 1./dC;
+            % Expanding on duplicate indices
+            z = dC(iR) .* v;
+        end
+        
+        function z = hessPrecD(self, ind, v)
+            %% HessPrecD
+            z = (1./(self.prec.Mdiag(ind).^2)) .* v;
+        end
+        
     end
     
     

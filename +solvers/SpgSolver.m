@@ -121,6 +121,10 @@ classdef SpgSolver < solvers.NlpSolver
             %% Solve using MinConf_SPG
             
             self.solveTime = tic;
+            self.iStop = self.EXIT_NONE;
+            self.nProj = 0;
+            self.iter = 1;
+            self.nlp.resetCounters();
             
             printObj = utils.PrintInfo('Spg');
             
@@ -143,12 +147,6 @@ classdef SpgSolver < solvers.NlpSolver
                         self.LOG_HEADER{:});
                 end
             end
-            
-            % Exit flag set to 0, will exit if not 0
-            self.iStop = self.EXIT_NONE;
-            % Resetting the counters
-            self.nProj = 0;
-            self.iter = 1;
             
             % Evaluate Initial Point
             x = self.project(self.nlp.x0);

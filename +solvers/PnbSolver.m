@@ -7,6 +7,7 @@ classdef PnbSolver < solvers.NlpSolver
         fid;
         lsFunc; % Line search function
         exactLS;
+        newtonFunc;
     end
     
     properties (Hidden = true, Constant)
@@ -30,6 +31,7 @@ classdef PnbSolver < solvers.NlpSolver
             p.addParameter('maxIterLS', 50); % Max iters for line search
             p.addParameter('exactLS', false);
             p.addParameter('fid', 1);
+            p.addParameter('precond', false);
             
             p.parse(varargin{:});
             
@@ -39,6 +41,7 @@ classdef PnbSolver < solvers.NlpSolver
             self.maxIterLS = p.Results.maxIterLS;
             self.exactLS = p.Results.exactLS;
             self.fid = p.Results.fid;
+            precond = p.Results.precond;
             
             % Exact line search is only implemented for quadratic or least
             % squares models
@@ -53,8 +56,19 @@ classdef PnbSolver < solvers.NlpSolver
                     self.restrictedArmijo(xNew, f, x, g, d, H, working);
             end
             
+            if strcmp(precond, 'precBCCB')
+                self.newtonFunc = @(g, H, working) ...
+                    self.precNewtonDir(g, H, working);
+            elseif strcmp(precond, 'precD')
+                self.newtonFunc = @(g, H, working) ...
+                    self.precNewtonDir2(g, H, working);
+            else strcmp(precond, 'noPrec')
+                self.newtonFunc = @(g, H, working) ...
+                    self.newtonDir(g, H);
+            end
+            
             import utils.PrintInfo;
-%             import linesearch.redProjArmijo;
+            %             import linesearch.redProjArmijo;
         end % constructor
         
         function self = solve(self)
@@ -63,12 +77,13 @@ classdef PnbSolver < solvers.NlpSolver
             self.solveTime = tic;
             self.iter = 1;
             self.iStop = self.EXIT_NONE;
+            self.nlp.resetCounters();
             
             printObj = utils.PrintInfo('Pnb');
             
             % Output Log
             if self.verbose >= 2
-                extra = containers.Map( ... 
+                extra = containers.Map( ...
                     {'suffDec', 'maxIterLS', 'exactLS'}, ...
                     {self.suffDec, self.maxIterLS, self.exactLS});
                 printObj.header(self, extra);
@@ -133,7 +148,7 @@ classdef PnbSolver < solvers.NlpSolver
                 H = H(working, working);
                 
                 % Compute Newton direction for free variables only
-                d = self.newtonDir(g, H);
+                d = self.newtonFunc(g, H, working);
                 
                 % Compute restricted projected Armijo line search
                 xNew = self.lsFunc(xNew, f, x, g, d, H, working);
@@ -211,7 +226,7 @@ classdef PnbSolver < solvers.NlpSolver
             % identify more variables that should be fixed.
             
             % Compute a Newton direction from reduced g & H
-            d = self.newtonDir(g(~gFixed), H(~gFixed, ~gFixed));
+            d = self.newtonFunc(g(~gFixed), H(~gFixed, ~gFixed), ~gFixed);
             
             % We restrict x to the free variables
             x = x(~gFixed);
@@ -235,6 +250,36 @@ classdef PnbSolver < solvers.NlpSolver
             % Different methods could be used. Using PCG for now.
             [d, ~] = pcg(H, -g, self.aOptTol + self.rOptTol, ...
                 max(1e4, self.nlp.n));
+        end
+        
+        function d = precNewtonDir(self, g, H, working)
+            %% NewtonDir - computes a Newton descent direction
+            % Solves the equation H * d = -g, using the gradient and
+            % hessian provided as input arguments, assuming they are of
+            % reduced size. This descent direction should only be computed
+            % on the free variables.
+            
+            % Handle to hessian preconditionner
+            precFunc = @(v) self.nlp.hessPrecBCCB(working, v);
+            
+            % Different methods could be used. Using PCG for now.
+            [d, ~] = pcg(H, -g, self.aOptTol + self.rOptTol, ...
+                max(1e4, self.nlp.n), precFunc);
+        end
+        
+        function d = precNewtonDir2(self, g, H, working)
+            %% NewtonDir - computes a Newton descent direction
+            % Solves the equation H * d = -g, using the gradient and
+            % hessian provided as input arguments, assuming they are of
+            % reduced size. This descent direction should only be computed
+            % on the free variables.
+            
+            % Handle to hessian preconditionner
+            precFunc = @(v) self.nlp.hessPrecD(working, v);
+            
+            % Different methods could be used. Using PCG for now.
+            [d, ~] = pcg(H, -g, self.aOptTol + self.rOptTol, ...
+                max(1e4, self.nlp.n), precFunc);
         end
         
         function xNew = restrictedArmijo(self, xNew, f, x, g, d, ~, ...

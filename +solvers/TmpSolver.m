@@ -71,6 +71,8 @@ classdef TmpSolver < solvers.NlpSolver
         damped; % L-BFGS
         fid;
         krylOpts;
+        
+        precond;
     end % private properties
     
     properties (Hidden = true, Constant)
@@ -105,7 +107,7 @@ classdef TmpSolver < solvers.NlpSolver
             p.addParameter('damped', 0);
             p.addParameter('fid', 1);
             p.addParameter('maxIterLS', 50); % Max iters for linesearch
-            
+            p.addParameter('precond', 'noPrec');
             p.parse(varargin{:});
             
             self = self@solvers.NlpSolver(nlp, p.Unmatched);
@@ -116,6 +118,7 @@ classdef TmpSolver < solvers.NlpSolver
             self.corrections = p.Results.corrections;
             self.damped = p.Results.damped;
             self.fid = p.Results.fid;
+            self.precond = p.Results.precond;
             
             if (strcmp(self.method, 'lsqr') || ...
                     strcmp(self.method, 'lsmr')) && ...
@@ -144,10 +147,9 @@ classdef TmpSolver < solvers.NlpSolver
             % direction according to the 'method' parameter.
             
             self.solveTime = tic;
-            
-            % Setting counters and exit flag, will exit if not 0
             self.iStop = self.EXIT_NONE;
             self.iter = 1;
+            self.nlp.resetCounters();
             
             printObj = utils.PrintInfo('Tmp');
             
@@ -171,16 +173,6 @@ classdef TmpSolver < solvers.NlpSolver
                 [f, g, H] = self.nlp.obj(x);
                 if strcmp(self.method, 'newton') && ~isnumeric(H)
                     error('Hessian must be explicit if newton is used');
-                end
-                % Checking if hessian is symmetric
-                y = ones(self.nlp.n, 1);
-                w = H * y;
-                t = y' * H * w; % y' * H * H * y
-                s = w' * w; % y' * H' * H * y
-                epsa = (s + eps) * eps^(1/3);
-                if abs(s - t) > epsa
-                    error(['Can''t use that method because hessian is', ...
-                        ' not symmetric']);
                 end
                 secondOrder = 1;
             elseif strcmp(self.method, 'lbfgs') || strcmp(self.method, ...
@@ -233,9 +225,26 @@ classdef TmpSolver < solvers.NlpSolver
                             -g(working), self.krylOpts);
                     case 'pcg'
                         % Double argout for pcg disables output message...
-                        [d(working), ~] = pcg(H(working, working), ...
-                            -g(working), self.rOptTol + self.aOptTol, ...
-                            self.krylOpts.itnlim);
+                        if strcmp(self.precond, 'precBCCB')
+                            precFunc = @(v) ...
+                                self.nlp.hessPrecBCCB(working, v);
+                            
+                            [d(working), ~] = pcg(H(working, working), ...
+                                -g(working), self.rOptTol + ...
+                                self.aOptTol, self.krylOpts.itnlim, ...
+                                precFunc);
+                        elseif strcmp(self.precond, 'precD')
+                            precFunc = @(v) self.nlp.hessPrecD(working, v);
+                            
+                            [d(working), ~] = pcg(H(working, working), ...
+                                -g(working), self.rOptTol + ...
+                                self.aOptTol, self.krylOpts.itnlim, ...
+                                precFunc);
+                        else % strcmp(self.precond, 'noPrec')
+                            [d(working), ~] = pcg(H(working, working), ...
+                                -g(working), self.rOptTol + self.aOptTol, ...
+                                self.krylOpts.itnlim);
+                        end
                     case 'lbfgs'
                         if self.iter == 1
                             % First iteration is steepest descent

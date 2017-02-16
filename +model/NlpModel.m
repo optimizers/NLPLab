@@ -316,6 +316,27 @@ classdef NlpModel < handle
             end
         end
         
+        function resetCounters(self)
+            %% ResetCounters
+            % Reset call counters and timers
+            % Number of calls counters
+            self.ncalls_fobj = 0;
+            self.ncalls_gobj = 0;
+            self.ncalls_fcon = 0;
+            self.ncalls_gcon = 0;
+            self.ncalls_hvp  = 0;
+            self.ncalls_hes  = 0;
+            self.ncalls_ghiv = 0;
+            % Time in calls
+            self.time_fobj = 0;
+            self.time_gobj = 0;
+            self.time_fcon = 0;
+            self.time_gcon = 0;
+            self.time_hvp  = 0;
+            self.time_hes  = 0;
+            self.time_ghiv = 0;
+        end
+        
     end
     
     
