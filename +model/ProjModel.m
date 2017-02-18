@@ -128,7 +128,8 @@ classdef ProjModel < model.LeastSquaresModel
         
         %% This method doesn't correspond to the same problem
         % Solves the projection { x | C*x = 0 } for the primal variable
-        function wProj = eqProject(self, d, fixed, tol, iterMax)
+        function [wProj, innerIter] = eqProject(self, d, fixed, tol, ...
+                iterMax)
             %% EqProject - project vector d on equality constraints
             % Solves the problem
             % min   1/2 || w - d||^2
@@ -159,7 +160,7 @@ classdef ProjModel < model.LeastSquaresModel
             subA = self.A(fixed, :); % B * C
             subAAt = self.AAt(fixed, fixed);
             % Using CG to solve (B*C*C'*B') z = -B*C*d
-            [z, ~] = pcg(subAAt', subA*(-d), tol, iterMax);
+            [z, ~, ~, innerIter] = pcg(subAAt', subA*(-d), tol, iterMax);
             % For the unconstrained case, the solution is trivial
             wProj = d + (subA' * z);
         end

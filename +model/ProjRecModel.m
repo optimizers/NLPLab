@@ -17,6 +17,8 @@ classdef ProjRecModel < model.RecModel
         projSolver;
         solved;
         normJac;
+        
+        innerIter;
     end
     
     
@@ -57,6 +59,8 @@ classdef ProjRecModel < model.RecModel
             self.projSolver = projSolver;
             % Getting projModel's normJac property
             self.normJac = self.projSolver.nlp.normJac;
+            
+            self.innerIter = 0;
         end
         
         function z = project(self, x)
@@ -91,7 +95,10 @@ classdef ProjRecModel < model.RecModel
             %   - ind: logical array of constraints that must be = 0
             % Output:
             %   - w: the projection of d
-            w = self.projSolver.nlp.eqProject(d, ind, tol, iterMax);
+            [w, innerIter] = self.projSolver.nlp.eqProject(d, ind, tol, ...
+                iterMax);
+            
+            self.innerIter = innerIter;
         end
         
     end

@@ -137,7 +137,7 @@ classdef PqnSolver < solvers.NlpSolver
             %             import linesearch.armijo;
             
             self.stats.proj = struct;
-            self.stats.proj.info = [];
+            self.stats.proj.info = [0, 0, 0, 0, 0, 0, 0];
             self.stats.proj.infoHeader = ...
                 {'nProj', 'iter', 'nObjFunc', 'nGrad', 'nHess', ...
                 'pgNorm', 'solveTime'};
@@ -362,19 +362,22 @@ classdef PqnSolver < solvers.NlpSolver
                 self.iStop = self.EXIT_PROJ_FAILURE;
             end
             
+            self.nProj = self.nProj + 1;
+            
             % This can be removed later
             if isprop(self.nlp, 'projSolver')
                 solver = self.nlp.projSolver;
-                % Collecting statistics
-                self.stats.proj.info = [self.stats.proj.info; ...
-                    [self.nProj, solver.iter, solver.nObjFunc, ...
+                temp = [self.nProj, solver.iter, solver.nObjFunc, ...
                     solver.nGrad, solver.nHess, solver.pgNorm, ...
-                    solver.solveTime]];
+                    solver.solveTime];
+                temp(2 : end - 2) = temp(2 : end - 2) + ...
+                    self.stats.proj.info(end, 2 : end - 2);
+                temp(end) = temp(end) + self.stats.proj.info(end, end);
+                % Collecting statistics
+                self.stats.proj.info = [self.stats.proj.info; temp];
                 self.stats.proj.exit{end + 1} = ...
                     solver.EXIT_MSG{solver.iStop};
             end
-            
-            self.nProj = self.nProj + 1;
         end
         
         function p = solveSubProblem(self, x, g, H, xInit)
