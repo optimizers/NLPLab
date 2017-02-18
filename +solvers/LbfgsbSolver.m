@@ -61,10 +61,11 @@ classdef LbfgsbSolver < solvers.NlpSolver
                 self.iterGuard, self.startAttempt);
             
             self.iStop = self.EXIT_OPT_TOL;
-            if ~strcmp(stopReason(1:4), 'CONV')
-                warning('Projection sub-problem didn''t converge: %s', ...
-                    stopReason);
+            self.solved = true;
+            if ~strcmp(stopReason(1:4), 'CONV') && ...
+                    ~strcmp(stopReason(1:4), 'NCON')
                 self.iStop = self.EXIT_INNER_FAIL;
+                self.solved = false;
             end
             
             % Collecting information from L-BFGS-B's output
@@ -76,7 +77,7 @@ classdef LbfgsbSolver < solvers.NlpSolver
             
             self.solveTime = rt;
             self.pgNorm = iterHist(end, 3);
-            self.iter = iterHist(end, 1);
+            self.iter = iterHist(end, 1) + 1;
             self.x = zProj;
             
             if self.verbose

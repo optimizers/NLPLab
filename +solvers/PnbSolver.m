@@ -48,12 +48,12 @@ classdef PnbSolver < solvers.NlpSolver
             if self.exactLS && ...
                     (isa(self.nlp, 'model.LeastSquaresModel') || ...
                     isa(self.nlp, 'model.QpModel'))
-                self.lsFunc = @(xNew, f, x, g, d, H, working) ...
-                    self.restrictedExact(xNew, f, x, g, d, H, working);
+                self.lsFunc = @(xNew, x, f, g, d, H, working) ...
+                    self.restrictedExact(xNew, x, f, g, d, H, working);
             else
                 % Otherwise, default to Armijo
-                self.lsFunc = @(xNew, f, x, g, d, H, working) ...
-                    self.restrictedArmijo(xNew, f, x, g, d, H, working);
+                self.lsFunc = @(xNew, x, f, g, d, H, working) ...
+                    self.restrictedArmijo(xNew, x, f, g, d, H, working);
             end
             
             if strcmp(precond, 'precBCCB')
@@ -151,7 +151,7 @@ classdef PnbSolver < solvers.NlpSolver
                 d = self.newtonFunc(g, H, working);
                 
                 % Compute restricted projected Armijo line search
-                xNew = self.lsFunc(xNew, f, x, g, d, H, working);
+                xNew = self.lsFunc(xNew, x, f, g, d, H, working);
                 
                 % Taking step, restore x to full-sized
                 x = xNew;
@@ -282,7 +282,7 @@ classdef PnbSolver < solvers.NlpSolver
                 max(1e4, self.nlp.n), precFunc);
         end
         
-        function xNew = restrictedArmijo(self, xNew, f, x, g, d, ~, ...
+        function xNew = restrictedArmijo(self, xNew, x, f, g, d, ~, ...
                 working)
             %% RestrictedArmijo - Armijo line search on the restricted vars
             % Perform a projected Armijo line search on the reduced
@@ -312,7 +312,7 @@ classdef PnbSolver < solvers.NlpSolver
             end
         end
         
-        function xNew = restrictedExact(self, xNew, ~, x, g, d, H, working)
+        function xNew = restrictedExact(self, xNew, x, ~, g, d, H, working)
             %% RestrictedExact
             % Exact line search restricted to the free variables. xNew is
             % projected at the end to ensure the value remains within the

@@ -38,9 +38,16 @@ classdef CflashSolver < solvers.NlpSolver
         fMin;
         fid; % File ID of where to direct log output
         
-        iterExtra;
         stats;
+        
+        % Initialize cauchy with Barzilai-Borwein step length
         useBb;
+        % Backtracking parameters
+        backtracking;
+        suffDec;
+        maxIterLS;
+        
+        clock;
     end
     
     properties (Hidden = true, Constant)
@@ -54,12 +61,12 @@ classdef CflashSolver < solvers.NlpSolver
         eta2 = 0.75;
         
         % Log header and body formats.
-        LOG_HEADER_FORMAT = ['\n%5s  %13s  %13s  %9s  %5s  %9s  %9s', ...
+        LOG_HEADER_FORMAT = ['\n%5s  %13s  %13s  %9s  %5s  %9s', ...
             '  %9s  %6s  %6s\n'];
-        LOG_BODY_FORMAT = ['%5d  %13.6e  %13.6e  %9d  %5d  %9d', ...
+        LOG_BODY_FORMAT = ['%5d  %13.6e  %13.6e  %9d  %5d', ...
             '  %9.3e  %9.3e  %3s  %6d\n'];
         LOG_HEADER = {'iter', 'f(x)', '|g(x)|', '# Proj', 'cg', ...
-            'iterExtra', 'preRed', 'radius', 'status', '#free'};
+            'preRed', 'radius', 'status', '#free'};
     end % constant properties
     
     
@@ -98,6 +105,9 @@ classdef CflashSolver < solvers.NlpSolver
             p.addParameter('eqTol', 1e-6);
             p.addParameter('maxProj', 1e5);
             p.addParameter('useBb', false);
+            p.addParameter('backtracking', false);
+            p.addParameter('maxIterLS', 10);
+            p.addParameter('suffDec', 1e-4);
             
             p.parse(varargin{:});
             
@@ -112,11 +122,18 @@ classdef CflashSolver < solvers.NlpSolver
             self.eqTol = p.Results.eqTol;
             self.maxProj = p.Results.maxProj;
             self.useBb = p.Results.useBb;
+            self.backtracking = p.Results.backtracking;
+            self.suffDec = p.Results.suffDec;
+            self.maxIterLS = p.Results.maxIterLS;
+            
+            if self.backtracking
+                import linesearch.projectedArmijo;
+            end
             
             import utils.PrintInfo;
             
             self.stats.proj = struct;
-            self.stats.proj.info = [];
+            self.stats.proj.info = [0, 0, 0, 0, 0, 0, 0];
             self.stats.proj.infoHeader = ...
                 {'nProj', 'iter', 'nObjFunc', 'nGrad', 'nHess', ...
                 'pgNorm', 'solveTime'};
@@ -133,13 +150,22 @@ classdef CflashSolver < solvers.NlpSolver
         function self = solve(self)
             %% Solve
             
+            self.clock = struct;
+            self.clock.cauchy.all = 0;
+            self.clock.cauchy.interp = 0;
+            self.clock.cauchy.extrap = 0;
+            self.clock.spcg.all = 0;
+            self.clock.spcg.prsrch.all = 0;
+            self.clock.spcg.prsrch.interp = 0;
+            self.clock.spcg.trpcg.all = 0;
+            self.clock.spcg.trpcg.eqproj = 0;
+            
             self.solveTime = tic;
             self.iter = 1;
             self.iterCg = 1;
             self.nSuccessIter = 0;
             self.iStop = self.EXIT_NONE;
             self.nProj = 0;
-            self.iterExtra = 1;
             self.nlp.resetCounters();
             
             printObj = utils.PrintInfo('Cflash');
@@ -176,7 +202,7 @@ classdef CflashSolver < solvers.NlpSolver
             status = '';
             
             %% Main loop
-            while ~self.iStop
+            while true
                 % Check stopping conditions
                 [~, nFree] = self.getIndFree(x);
                 pgNorm = norm(self.gpstep(x, -1, g));
@@ -199,8 +225,8 @@ classdef CflashSolver < solvers.NlpSolver
                 % Print current iter to log
                 if self.verbose >= 2
                     self.printf(self.LOG_BODY_FORMAT, self.iter, f, ...
-                        pgNorm, self.nProj, self.iterCg, ...
-                        self.iterExtra, preRed, delta, status, nFree);
+                        pgNorm, self.nProj, self.iterCg, preRed, delta, ...
+                        status, nFree);
                 end
                 
                 self.nObjFunc = self.nlp.ncalls_fobj + ...
@@ -217,7 +243,7 @@ classdef CflashSolver < solvers.NlpSolver
                     self.x = x;
                     self.fx = f;
                     self.pgNorm = pgNorm;
-                    break
+                    break;
                 end
                 
                 fc = f;
@@ -227,45 +253,62 @@ classdef CflashSolver < solvers.NlpSolver
                 H = self.nlp.hobj(x);
                 
                 % Cauchy step
+                t = tic;
                 [alphc, s] = self.cauchy(H, x, g, delta, alphc);
+                self.clock.cauchy.all = self.clock.cauchy.all + toc(t);
                 
                 % Projected Newton step
+                t = tic;
                 [x, s, ~] = self.spcg(H, x, g, delta, s);
+                self.clock.spcg.all = self.clock.spcg.all + toc(t);
                 
-                % Predicted reduction.
-                Hs = self.nlp.hobjprod(x, [], s);
-                preRed = -(s' * g + 0.5 * s' * Hs);
-                
-                % Compute the objective at this new point.
+                % Compute the objective at this new point
                 f = self.nlp.fobj(x);
-                actRed = fc - f;
                 
-                % Update the trust-region radius
-                delta = self.updateDelta(f, fc, g, s, actRed, preRed, ...
-                    delta);
-                
-                % Accept or reject step
-                if actRed > self.eta0 * preRed;
-                    % Successful step
-                    status = '';
-                    self.nSuccessIter = self.nSuccessIter + 1;
-                    if self.useBb
-                        % Can only use Bb step if iteration is successful
-                        gOld = g;
-                        % Update the gradient value
-                        g = self.nlp.gobj(x);
-                        % Update initial alphc used in Cauchy
-                        alphc = self.bbStepLength(xc, x, gOld, g);
+                backtrackAttempted = false;
+                while true
+                    % Predicted reduction
+                    Hs = self.nlp.hobjprod(x, [], s);
+                    preRed = -(s' * g + 0.5 * s' * Hs);
+                    % Actual reduction
+                    actRed = fc - f;
+                    % Update the trust-region radius
+                    delta = self.updateDelta(f, fc, g, s, actRed, ...
+                        preRed, delta);
+                    
+                    % Accept or reject step
+                    if actRed > self.eta0 * preRed;
+                        % Successful step
+                        status = '';
+                        self.nSuccessIter = self.nSuccessIter + 1;
+                        if self.useBb % Init cauchy with BB step length
+                            % Can only use BB step if iteration successful
+                            gOld = g;
+                            % Update the gradient value
+                            g = self.nlp.gobj(x);
+                            % Update initial alphc used in Cauchy
+                            alphc = self.bbStepLength(xc, x, gOld, g);
+                        else
+                            % Update the gradient value
+                            g = self.nlp.gobj(x);
+                        end
+                        % Break loop if step is accepted
+                        break;
+                    elseif self.backtracking && ~backtrackAttempted
+                        % The step is rejected, but we attempt to backtrack
+                        [x, f] = linesearch.projectedArmijo(self, xc, ...
+                            fc, g, s);
+                        backtrackAttempted = true;
                     else
-                        % Update the gradient value
-                        g = self.nlp.gobj(x);
+                        % The step is rejected
+                        status = 'rej';
+                        % Fallback on previous values
+                        f = fc;
+                        x = xc;
+                        % No backtracking is attempted or backtracking was
+                        % already attempted. Exit loop.
+                        break;
                     end
-                else
-                    % The step is rejected
-                    status = 'rej';
-                    % Fallback on previous values
-                    f = fc;
-                    x = xc;
                 end
                 
                 self.iter = self.iter + 1;
@@ -284,6 +327,32 @@ classdef CflashSolver < solvers.NlpSolver
             
             self.stats.rec.exit{end + 1} = self.EXIT_MSG{self.iStop};
         end % solve
+        
+        function xProj = project(self, x)
+            %% Project - simple wrapper to increment nProj counter
+            xProj = self.nlp.project(x);
+            if ~self.nlp.solved
+                % Propagate throughout the program to exit
+                self.iStop = self.EXIT_PROJ_FAILURE;
+            end
+            
+            self.nProj = self.nProj + 1;
+            
+            % This can be removed later
+            if isprop(self.nlp, 'projSolver')
+                solver = self.nlp.projSolver;
+                temp = [self.nProj, solver.iter, solver.nObjFunc, ...
+                    solver.nGrad, solver.nHess, solver.pgNorm, ...
+                    solver.solveTime];
+                temp(2 : end - 2) = temp(2 : end - 2) + ...
+                    self.stats.proj.info(end, 2 : end - 2);
+                temp(end) = temp(end) + self.stats.proj.info(end, end);
+                % Collecting statistics
+                self.stats.proj.info = [self.stats.proj.info; temp];
+                self.stats.proj.exit{end + 1} = ...
+                    solver.EXIT_MSG{solver.iStop};
+            end
+        end
         
     end % public methods
     
@@ -319,29 +388,6 @@ classdef CflashSolver < solvers.NlpSolver
                     max(alphMin, (s' * s) / betaBB));
             end
         end % bbsteplength
-        
-        function xProj = project(self, x)
-            %% Project - simple wrapper to increment nProj counter
-            xProj = self.nlp.project(x);
-            if ~self.nlp.solved
-                % Propagate throughout the program to exit
-                self.iStop = self.EXIT_PROJ_FAILURE;
-            end
-            
-            % This can be removed later
-            if isprop(self.nlp, 'projSolver')
-                solver = self.nlp.projSolver;
-                % Collecting statistics
-                self.stats.proj.info = [self.stats.proj.info; ...
-                    [self.nProj, solver.iter, solver.nObjFunc, ...
-                    solver.nGrad, solver.nHess, solver.pgNorm, ...
-                    solver.solveTime]];
-                self.stats.proj.exit{end + 1} = ...
-                    solver.EXIT_MSG{solver.iStop};
-            end
-            
-            self.nProj = self.nProj + 1;
-        end
         
         function xProj = eqProject(self, x, ind, tol, iterMax)
             %% EqProject - simple wrapper to increment nProj counter
@@ -428,15 +474,16 @@ classdef CflashSolver < solvers.NlpSolver
             
             % Either interpolate or extrapolate to find a successful step.
             if interp
+                t = tic;
                 self.logger.debug('Interpolating');
                 % Reduce alph until a successful step is found.
                 search = true;
-                while search && (toc(self.solveTime) < self.maxRT)
+                while search && (toc(self.solveTime) < self.maxRT) && ...
+                        ~self.iStop
                     % This is a crude interpolation procedure that
                     % will be replaced in future versions of the code.
                     alph = interpf * alph;
                     s = self.gpstep(x, -alph, g);
-                    self.iterExtra = self.iterExtra + 1;
                     sNorm = norm(s);
                     self.logger.debug(sprintf('\t||s|| = %7.3e', sNorm));
                     if sNorm <= delta
@@ -445,18 +492,20 @@ classdef CflashSolver < solvers.NlpSolver
                         search = (q >= self.mu0 * gts);
                     end
                 end
+                self.clock.cauchy.interp = self.clock.cauchy.interp + toc(t);
             else % Extrapolate
+                t = tic;
                 self.logger.debug('Extrapolating');
                 % Increase alph until a successful step is found.
                 search = true;
                 alphas = alph;
                 while search && (alph <= brptMax) && ...
-                        (toc(self.solveTime) < self.maxRT)
+                        (toc(self.solveTime) < self.maxRT) && ...
+                        ~self.iStop
                     % This is a crude extrapolation procedure that
                     % will be replaced in future versions of the code.
                     alph = extrapf * alph;
                     s = self.gpstep(x, -alph, g);
-                    self.iterExtra = self.iterExtra + 1;
                     sNorm = norm(s);
                     self.logger.debug(sprintf('\t||s|| = %7.3e', sNorm));
                     if sNorm <= delta
@@ -473,6 +522,7 @@ classdef CflashSolver < solvers.NlpSolver
                 % Recover the last successful step.
                 alph = alphas;
                 s = self.gpstep(x, -alph, g);
+                self.clock.cauchy.extrap = self.clock.cauchy.extrap + toc(t);
             end
             self.logger.debug(sprintf('Leaving Cauchy, α = %7.1e', alph));
         end % cauchy
@@ -526,13 +576,13 @@ classdef CflashSolver < solvers.NlpSolver
             % Reduce alph until the sufficient decrease condition is
             % satisfied or x + alph*w is feasible.
             self.logger.debug('Interpolating');
+            t = tic;
             while true && (alph > brptMin) && ...
-                    (toc(self.solveTime) < self.maxRT)
+                    (toc(self.solveTime) < self.maxRT) && ~self.iStop
                 
                 % Calculate P[x + alph*w] - x and check the sufficient
                 % decrease condition.
                 s = self.gpstep(x, alph, w);
-                self.iterExtra = self.iterExtra + 1;
                 self.logger.debug(sprintf('\t||s|| = %7.3e', norm(s)));
                 gts = g' * s;
                 if 0.5 * s'*H*s + gts <= self.mu0 * gts
@@ -543,7 +593,7 @@ classdef CflashSolver < solvers.NlpSolver
                     alph = interpf * alph;
                 end
             end
-            
+            self.clock.spcg.prsrch.interp = self.clock.spcg.prsrch.interp + toc(t);
             % Force at least one more constraint to be added to the active
             % set if alph < brptMin and the full step is not successful.
             % There is sufficient decrease because the quadratic function
@@ -638,14 +688,17 @@ classdef CflashSolver < solvers.NlpSolver
                 % Solve the trust region subproblem in the free variables
                 % to generate a direction p[k]. Store p[k] in the array w.
                 tol = self.cgTol * gNorm;
+                t = tic;
                 [w, iterTR, infotr] = self.trpcg(H, gQuad, delta, ...
                     tol, self.maxIterCg, indFree);
-                
+                self.clock.spcg.trpcg.all = self.clock.spcg.trpcg.all + toc(t);
                 iters = iters + iterTR;
                 
                 % Use a projected search to obtain the next iterate.
                 % The projected search algorithm stores s[k] in w.
+                t = tic;
                 w = self.prsrch(H, x, gQuad, w);
+                self.clock.spcg.prsrch.all = self.clock.spcg.prsrch.all + toc(t);
                 
                 % Update the minimizer and the step.
                 % Note that s now contains x[k+1] - x[0].
@@ -767,8 +820,10 @@ classdef CflashSolver < solvers.NlpSolver
                 chk = any(Cp(~indFree) >= appZero);
                 if chk
                     % Project {p : (C*p)_i = 0} for i such as (C*x)_i = 0
+                    t = tic;
                     p = self.eqProject(p, ~indFree, ...
                         self.aOptTol + self.rOptTol, self.nlp.n);
+                    self.clock.spcg.trpcg.eqproj = self.clock.spcg.trpcg.eqproj + toc(t);
                 end
                 
                 % Cp = self.nlp.fcon(p); % Computes C*p
@@ -850,19 +905,12 @@ classdef CflashSolver < solvers.NlpSolver
             % Smallest approximation is eps
             appZero = max(self.eqTol * self.nlp.normJac * norm(x), eps);
             
-            % Redefining iLow & iUpp (lower & upper indices of bounded
-            % constraints) as positions instead of logical
-%             iLow = find(self.nlp.iLow);
-%             iUpp = find(self.nlp.iUpp);
-            iLow = 1:self.nlp.n;
-            iUpp = iLow;
+            % Lower constraint intersections: C*x - cL > 0 & C*w < 0
+            dec = (Cx - self.nlp.cL >= appZero) & (Cw <= appZero);
+            % Upper constraint intersections: cU - C*x > 0 & C*w > 0
+            inc = (self.nlp.cU - Cx >= appZero) & (Cw >= appZero);
             
-            % Lower constraint intersections: Ax - cL > 0 & Aw < 0
-            dec = (Cx(iLow) - self.nlp.cL(iLow) >= appZero) & Cw(iLow) < 0;
-            % Upper constraint intersections: cU - Cx > 0 & Aw > 0
-            inc = (self.nlp.cU(iUpp) - Cx(iUpp) >= appZero) & Cw(iUpp) > 0;
-            
-            nBrpt = sum(dec) + sum(inc);
+            nBrpt = sum(dec | inc);
             
             % Quick exit if no breakpoints
             if nBrpt == 0
@@ -870,9 +918,6 @@ classdef CflashSolver < solvers.NlpSolver
                 brptMax = 0;
                 return
             end
-            
-            dec = iLow(dec);
-            inc = iUpp(inc);
             
             brptDec = (self.nlp.cL(dec) - Cx(dec)) ./ Cw(dec);
             brptInc = (self.nlp.cU(inc) - Cx(inc)) ./ Cw(inc);

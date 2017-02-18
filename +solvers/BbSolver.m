@@ -13,12 +13,14 @@ classdef BbSolver < solvers.NlpSolver
         suffDec;
         maxProj;
         
+        bbFunc;
+        
         stats;
     end % private properties
     
     properties (Hidden = true, Constant)
         LOG_HEADER = { ...
-            'Iteration', 'FunEvals', 'Projections', 'Step Length', ...
+            'Iteration', 'FunEvals', 'Projections', 'Alph', ...
             'Function Val', '||Pg||'};
         LOG_FORMAT = '%10s %10s %10s %15s %15s %15s\n';
         LOG_BODY = '%10d %10d %10d %15.5e %15.5e %15.5e\n';
@@ -26,6 +28,7 @@ classdef BbSolver < solvers.NlpSolver
         ALPH_MAX = 1e3;
         SIG_1 = 0.1;
         SIG_2 = 0.9;
+        TAU = 0.15;
     end % constant properties
     
     
@@ -56,6 +59,7 @@ classdef BbSolver < solvers.NlpSolver
             p.addParameter('suffDec', 1e-4);
             p.addParameter('maxProj', 1e5);
             p.addParameter('maxIterLS', 50); % Max iters for linesearch
+            p.addParameter('bbType', 'BB1');
             
             p.parse(varargin{:});
             
@@ -73,13 +77,29 @@ classdef BbSolver < solvers.NlpSolver
             import utils.PrintInfo;
             import linesearch.nmSpectralArmijo;
             
+            switch p.Results.bbType
+                case 'BB1'
+                    self.bbFunc = @(xOld, x, gOld, g) ...
+                        self.bbStep(xOld, x, gOld, g);
+                case 'BB2'
+                    self.bbFunc = @(xOld, x, gOld, g) ...
+                        self.bbStep2(xOld, x, gOld, g);
+                case 'ABB'
+                    self.bbFunc = @(xOld, x, gOld, g) ...
+                        self.adaptiveBb(xOld, x, gOld, g);
+                otherwise
+                    % Default to first BB step length
+                    self.bbFunc = @(xOld, x, gOld, g) ...
+                        self.bbStep(xOld, x, gOld, g);
+            end
+            
             self.stats.proj = struct;
-            self.stats.proj.info = [];
+            self.stats.proj.info = [0, 0, 0, 0, 0, 0, 0];
             self.stats.proj.infoHeader = ...
                 {'nProj', 'iter', 'nObjFunc', 'nGrad', 'nHess', ...
                 'pgNorm', 'solveTime'};
             self.stats.proj.exit = {};
-                
+            
             self.stats.rec = struct;
             self.stats.rec.info = [];
             self.stats.rec.infoHeader = ...
@@ -138,7 +158,7 @@ classdef BbSolver < solvers.NlpSolver
                 
                 if self.verbose >= 2
                     self.printf(self.LOG_BODY, self.iter, ...
-                        self.nObjFunc, self.nProj, t, f, pgnrm);
+                        self.nObjFunc, self.nProj, alph, f, pgnrm);
                 end
                 
                 self.stats.rec.info = [self.stats.rec.info; ...
@@ -190,7 +210,8 @@ classdef BbSolver < solvers.NlpSolver
                 g = self.nlp.gobj(x);
                 
                 % Compute new step length according to BB rule
-                alph = self.bbStepLength(xOld, x, gOld, g);
+                alph = self.bbFunc(xOld, x, gOld, g);
+                %                 alph = self.bbStep(xOld, x, gOld, g);
                 
                 self.iter = self.iter + 1;
             end % main loop
@@ -231,24 +252,27 @@ classdef BbSolver < solvers.NlpSolver
                 self.iStop = self.EXIT_PROJ_FAILURE;
             end
             
+            self.nProj = self.nProj + 1;
+            
             % This can be removed later
             if isprop(self.nlp, 'projSolver')
                 solver = self.nlp.projSolver;
-                % Collecting statistics
-                self.stats.proj.info = [self.stats.proj.info; ...
-                    [self.nProj, solver.iter, solver.nObjFunc, ...
+                temp = [self.nProj, solver.iter, solver.nObjFunc, ...
                     solver.nGrad, solver.nHess, solver.pgNorm, ...
-                    solver.solveTime]];
+                    solver.solveTime];
+                temp(2 : end - 2) = temp(2 : end - 2) + ...
+                    self.stats.proj.info(end, 2 : end - 2);
+                temp(end) = temp(end) + self.stats.proj.info(end, end);
+                % Collecting statistics
+                self.stats.proj.info = [self.stats.proj.info; temp];
                 self.stats.proj.exit{end + 1} = ...
                     solver.EXIT_MSG{solver.iStop};
             end
-            
-            self.nProj = self.nProj + 1;
         end
         
-        function alph = bbStepLength(self, xOld, x, gOld, g)
+        function alph = bbStep(self, xOld, x, gOld, g)
             %% BBStepLength - Compute Barzilai-Borwein step length
-            % alph_BB = (s' * s) / (s' * y)
+            % Safeguarded alph_BB^1 = (s' * s) / (s' * y)
             s = x - xOld;
             % Denominator of Barzilai-Borwein step length
             betaBB = s' * (g - gOld);
@@ -265,9 +289,9 @@ classdef BbSolver < solvers.NlpSolver
             end
         end % bbsteplength
         
-        function alph = bbStepLength2(self, xOld, x, gOld, g)
+        function alph = bbStep2(self, xOld, x, gOld, g)
             %% BBStepLength2 - Compute Barzilai-Borwein step length
-            % % alph_BB = (s' * y) / (y' * y)
+            % Safeguarded alph_BB^2 = (s' * y) / (y' * y)
             y = g - gOld;
             % Denominator of Barzilai-Borwein step length
             betaBB = y' * y;
@@ -284,6 +308,25 @@ classdef BbSolver < solvers.NlpSolver
             end
         end % bbsteplength
         
-    end % private methods
-    
-end % class
+        function alph = adaptiveBb(self, xOld, x, gOld, g)
+            %% Adaptive Barzilai-Borwein step
+            % According to the procedure described in Frassoldati, Zanni,
+            % Zanghirati.
+            
+            % Evaluate both step lengths
+            s = x - xOld;
+            y = g - gOld;
+            % No safeguards applied
+            alphBb1 = (s' * s) / (s' * y);
+            alphBb2 = (s' * y) / (y' * y);
+
+            if alphBb2 / alphBb1 < self.TAU
+                alph = alphBb2;
+            else
+                alph = alphBb1;
+            end
+            
+        end % private methods
+        
+    end % class
+end

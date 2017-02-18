@@ -13,8 +13,6 @@ function [xNew, fNew, failed, t] = nonMonotoneArmijo(solver, x, f, g, d)
 %   - failed: failure flag (true if failed, false if convergence)
 %   - t: step length (might be needed by some solvers)
 
-% Update stored objective function values
-solver.storedObjFunc(mod(solver.iter - 1, solver.memory) + 1) = f;
 % Redefine f as the maximum
 fMax = max(solver.storedObjFunc);
 

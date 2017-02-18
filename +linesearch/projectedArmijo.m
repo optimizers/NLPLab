@@ -1,5 +1,4 @@
-function [xNew, fNew, failed, t] = projectedArmijo(solver, xNew, f, x, ...
-    g, d)
+function [xNew, fNew, failed, t] = projectedArmijo(solver, x, f, g, d)
 %% ProjectedArmijo - Projected Armijo line search
 % Inputs:
 %   - solver: NlpSolver object. Must possess suffDec & maxIterLS

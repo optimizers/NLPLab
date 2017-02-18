@@ -11,7 +11,13 @@ classdef BcflashSolver < solvers.NlpSolver
         cgTol;
         fMin;
         fid; % File ID of where to direct log output
+        
+        % Initialize cauchy with Barzilai-Borwein step length
         useBb;
+        % Backtracking parameters
+        backtracking;
+        suffDec;
+        maxIterLS;
     end
     
     properties (Hidden = true, Constant)
@@ -48,6 +54,9 @@ classdef BcflashSolver < solvers.NlpSolver
             p.addParameter('mu0', 0.01);
             p.addParameter('fid', 1);
             p.addParameter('useBb', false);
+            p.addParameter('backtracking', false);
+            p.addParameter('maxIterLS', 10);
+            p.addParameter('suffDec', 1e-4);
             
             p.parse(varargin{:});
             
@@ -60,6 +69,13 @@ classdef BcflashSolver < solvers.NlpSolver
             self.mu0 = p.Results.mu0;
             self.fid = p.Results.fid;
             self.useBb = p.Results.useBb;
+            self.backtracking = p.Results.backtracking;
+            self.suffDec = p.Results.suffDec;
+            self.maxIterLS = p.Results.maxIterLS;
+            
+            if self.backtracking
+                import linesearch.projectedArmijo;
+            end
             
             import utils.PrintInfo;
         end % constructor
@@ -149,40 +165,53 @@ classdef BcflashSolver < solvers.NlpSolver
                 % Projected Newton step
                 [x, s, ~] = self.spcg(H, x, g, delta, s);
                 
-                % Predicted reduction.
-                Hs = self.nlp.hobjprod(x, [], s);
-                preRed = -(s'*g + 0.5*s'*Hs);
-                
-                % Compute the objective at this new point.
+                % Compute the objective at this new point
                 f = self.nlp.fobj(x);
-                actRed = fc - f;
                 
-                % Update the trust-region radius
-                delta = self.updateDelta(f, fc, g, s, actRed, preRed, ...
-                    delta);
-                
-                % Accept or reject step
-                if actRed > self.eta0 * preRed;
-                    % Successful step
-                    status = '';
-                    self.nSuccessIter = self.nSuccessIter + 1;
-                    if self.useBb
-                        % Can only use Bb step if iteration is successful
-                        gOld = g;
-                        % Update the gradient value
-                        g = self.nlp.gobj(x);
-                        % Update initial alphc used in Cauchy
-                        alphc = self.bbStepLength(xc, x, gOld, g);
+                backtrackAttempted = false;
+                while true
+                    % Predicted reduction
+                    Hs = self.nlp.hobjprod(x, [], s);
+                    preRed = -(s' * g + 0.5 * s' * Hs);
+                    % Actual reduction
+                    actRed = fc - f;
+                    % Update the trust-region radius
+                    delta = self.updateDelta(f, fc, g, s, actRed, ...
+                        preRed, delta);
+                    
+                    % Accept or reject step
+                    if actRed > self.eta0 * preRed;
+                        % Successful step
+                        status = '';
+                        self.nSuccessIter = self.nSuccessIter + 1;
+                        if self.useBb % Init cauchy with BB step length
+                            % Can only use BB step if iteration successful
+                            gOld = g;
+                            % Update the gradient value
+                            g = self.nlp.gobj(x);
+                            % Update initial alphc used in Cauchy
+                            alphc = self.bbStepLength(xc, x, gOld, g);
+                        else
+                            % Update the gradient value
+                            g = self.nlp.gobj(x);
+                        end
+                        % Break loop if step is accepted
+                        break;
+                    elseif self.backtracking && ~backtrackAttempted
+                        % The step is rejected, but we attempt to backtrack
+                        [x, f] = linesearch.projectedArmijo(self, xc, ...
+                            fc, g, s);
+                        backtrackAttempted = true;
                     else
-                        % Update the gradient value
-                        g = self.nlp.gobj(x);
+                        % The step is rejected
+                        status = 'rej';
+                        % Fallback on previous values
+                        f = fc;
+                        x = xc;
+                        % No backtracking is attempted or backtracking was
+                        % already attempted. Exit loop.
+                        break;
                     end
-                else
-                    % The step is rejected
-                    status = 'rej';
-                    % Fallback on previous values
-                    f = fc;
-                    x = xc;
                 end
                 
                 self.iter = self.iter + 1;
@@ -199,6 +228,16 @@ classdef BcflashSolver < solvers.NlpSolver
             
             printObj.footer(self);
         end % solve
+        
+        function x = project(self, x, ind)
+            %% Project
+            % Project a vector onto the box defined by bL, bU.
+            if nargin > 2
+                x = min(self.nlp.bU(ind), max(x, self.nlp.bL(ind)));
+            else
+                x = min(self.nlp.bU, max(x, self.nlp.bL));
+            end
+        end
         
     end % public methods
     
@@ -449,9 +488,9 @@ classdef BcflashSolver < solvers.NlpSolver
             %       min { q(x[k]+p) : || L'*p || <= delta, s(fixed) = 0 },
             %
             % where fixed is the set of variables fixed at x[k] and delta is
-            % the trust region bound. 
+            % the trust region bound.
             %
-            % Given p[k], the next minimizer x[k+1] is generated by a 
+            % Given p[k], the next minimizer x[k+1] is generated by a
             % projected search.
             %
             % The starting point for this subroutine is x[1] = x[0] + s,
@@ -533,16 +572,11 @@ classdef BcflashSolver < solvers.NlpSolver
                 % Compute A*(x[k+1] - x[0]) and store in w.
                 Hs = H * s;
                 
-                % Compute the gradient grad q(x[k+1]) = g + A*(x[k+1]-x[0])
-                % of q at x[k+1] for the free variables.
-                gFree = Hs(indFree) + g(indFree);
-                gfNormF = norm(gFree);
-                
                 % Convergence and termination test.
                 % We terminate if the preconditioned conjugate gradient
                 % method encounters a direction of negative curvature, or
                 % if the step is at the trust region bound.
-                if gfNormF <= self.cgTol * gfNorm
+                if norm(Hs(indFree) + g(indFree)) <= self.cgTol * gfNorm
                     info = 1;
                     break;
                 elseif infoTR == 2 || infoTR == 3
@@ -567,16 +601,6 @@ classdef BcflashSolver < solvers.NlpSolver
             end
         end
         
-        function x = project(self, x, ind)
-            %% Project
-            % Project a vector onto the box defined by bL, bU.
-            if nargin == 3
-                x = min(self.nlp.bU(ind), max(x, self.nlp.bL(ind)));
-            else
-                x = min(self.nlp.bU, max(x, self.nlp.bL));
-            end
-        end
-        
         function s = gpstep(self, x, alph, w, ind)
             %% GpStep - Compute the gradient projection step.
             % Compute the gradient projection step
@@ -584,7 +608,7 @@ classdef BcflashSolver < solvers.NlpSolver
             % s = P[x + alph*w] - x,
             %
             % where P is the projection onto the box defined by bL, bU.
-            if nargin == 5
+            if nargin > 4
                 s = self.project(x + alph * w, ind) - x;
             else
                 s = self.project(x + alph * w) - x;
@@ -597,7 +621,7 @@ classdef BcflashSolver < solvers.NlpSolver
             % the minimal and maximal break-points of the projection of
             % x + w on the n-dimensional interval [bL,bU].
             
-            if nargin == 4
+            if nargin > 3
                 bU = self.nlp.bU(ind);
                 bL = self.nlp.bL(ind);
             else
@@ -733,7 +757,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 p = r + betaFact*p;
                 rho = rtr;
             end % for loop
-
+            
             info = 4;
         end % trpcg
         
