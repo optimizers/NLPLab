@@ -62,13 +62,12 @@ classdef PnbSolver < solvers.NlpSolver
             elseif strcmp(precond, 'precD')
                 self.newtonFunc = @(g, H, working) ...
                     self.precNewtonDir2(g, H, working);
-            else strcmp(precond, 'noPrec')
+            else
                 self.newtonFunc = @(g, H, working) ...
                     self.newtonDir(g, H);
             end
             
             import utils.PrintInfo;
-            %             import linesearch.redProjArmijo;
         end % constructor
         
         function self = solve(self)
@@ -106,7 +105,7 @@ classdef PnbSolver < solvers.NlpSolver
             while ~self.iStop % self.iStop == 0
                 
                 % Get working set of variables
-                working = self.getWorkingSet(x, g, H);
+                working = self.getWorkingSet2(x, g, H);
                 
                 % Stopping criteria is the norm of the 'working' gradient
                 pgnrm = norm(g(working));
@@ -240,6 +239,43 @@ classdef PnbSolver < solvers.NlpSolver
             working = ~fixed;
         end
         
+        function working = getWorkingSet2(self, x, g, H)
+            %% GetWorkingSet - Finds the fixed set for proj. Newton step
+            % Using TMP's weird definition
+            % Inputs:
+            %   - x: current point
+            %   - g: gradient at current point
+            %   - H: hessian at current point
+            % Outputs:
+            %   - working: bool array of free variables
+            
+            % Find gradient fixed set
+            gFixed = (x <= self.nlp.bL & g >= 0) | ...
+                (x <= self.nlp.bU & g <= 0);
+            
+            % Save gradient fixed set
+            fixed = gFixed;
+            
+            % However, we will later compute a Newton direction instead of
+            % a steepest descent direction. Therefore, computing a Newton
+            % direction on the remaining free variables can help us
+            % identify more variables that should be fixed.
+            
+            % Compute a Newton direction from reduced g & H
+            d = self.newtonFunc(g(~gFixed), H(~gFixed, ~gFixed), ~gFixed);
+            
+            % We restrict x to the free variables
+            x = x(~gFixed);
+            
+            % Update the gradient fixed set with the Newton fixed set
+            % fixed := gradient fixed set | Newton fixed set
+            fixed(~gFixed) = (x <= self.nlp.bL(~gFixed) & d <= 0) | ...
+                (x >= self.nlp.bU(~gFixed) & d >= 0);
+            
+            % Finally, the working set represents the free variables
+            working = ~fixed;
+        end
+        
         function d = newtonDir(self, g, H)
             %% NewtonDir - computes a Newton descent direction
             % Solves the equation H * d = -g, using the gradient and
@@ -248,8 +284,7 @@ classdef PnbSolver < solvers.NlpSolver
             % on the free variables.
             
             % Different methods could be used. Using PCG for now.
-            [d, ~] = pcg(H, -g, self.aOptTol + self.rOptTol, ...
-                max(1e4, self.nlp.n));
+            [d, ~] = pcg(H, -g, self.aOptTol + self.rOptTol, self.nlp.n);
         end
         
         function d = precNewtonDir(self, g, H, working)

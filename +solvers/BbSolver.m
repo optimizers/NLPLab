@@ -14,6 +14,8 @@ classdef BbSolver < solvers.NlpSolver
         maxProj;
         
         bbFunc;
+        storedAlph;
+        tau;
         
         stats;
     end % private properties
@@ -28,7 +30,6 @@ classdef BbSolver < solvers.NlpSolver
         ALPH_MAX = 1e3;
         SIG_1 = 0.1;
         SIG_2 = 0.9;
-        TAU = 0.15;
     end % constant properties
     
     
@@ -86,7 +87,13 @@ classdef BbSolver < solvers.NlpSolver
                         self.bbStep2(xOld, x, gOld, g);
                 case 'ABB'
                     self.bbFunc = @(xOld, x, gOld, g) ...
-                        self.adaptiveBb(xOld, x, gOld, g);
+                        self.abb(xOld, x, gOld, g);
+                    self.tau = 0.15;
+                case 'ABBmin1'
+                    self.bbFunc = @(xOld, x, gOld, g) ...
+                        self.abbMin1(xOld, x, gOld, g);
+                    self.storedAlph = inf(self.memory, 1);
+                    self.tau = 0.8;
                 otherwise
                     % Default to first BB step length
                     self.bbFunc = @(xOld, x, gOld, g) ...
@@ -200,18 +207,19 @@ classdef BbSolver < solvers.NlpSolver
                 % Perform a non-monotone Armijo line search
                 [x, f, failed, t] = linesearch.nmSpectralArmijo(self, ...
                     x, f, g, d);
+                
+                % Evaluate gradient at new x
+                g = self.nlp.gobj(x);
+                
+                % Exit if line search failed
                 if failed
                     self.iStop = self.EXIT_MAX_ITER_LS;
                     pgnrm = norm(self.project(x - g) - x);
                     break;
                 end
                 
-                % Evaluate gradient at new x
-                g = self.nlp.gobj(x);
-                
                 % Compute new step length according to BB rule
                 alph = self.bbFunc(xOld, x, gOld, g);
-                %                 alph = self.bbStep(xOld, x, gOld, g);
                 
                 self.iter = self.iter + 1;
             end % main loop
@@ -308,8 +316,26 @@ classdef BbSolver < solvers.NlpSolver
             end
         end % bbsteplength
         
-        function alph = adaptiveBb(self, xOld, x, gOld, g)
+        function alph = abb(self, xOld, x, gOld, g)
             %% Adaptive Barzilai-Borwein step
+            
+            % Evaluate both step lengths
+            s = x - xOld;
+            y = g - gOld;
+            % No safeguards applied
+            alphBb1 = (s' * s) / (s' * y);
+            alphBb2 = (s' * y) / (y' * y);
+            
+            if alphBb2 / alphBb1 < self.tau
+                alph = alphBb2;
+            else
+                alph = alphBb1;
+            end
+            
+        end
+        
+        function alph = abbMin1(self, xOld, x, gOld, g)
+            %% "Min" Adaptive Barzilai-Borwein
             % According to the procedure described in Frassoldati, Zanni,
             % Zanghirati.
             
@@ -319,14 +345,17 @@ classdef BbSolver < solvers.NlpSolver
             % No safeguards applied
             alphBb1 = (s' * s) / (s' * y);
             alphBb2 = (s' * y) / (y' * y);
-
-            if alphBb2 / alphBb1 < self.TAU
-                alph = alphBb2;
+            
+            % Update stored alphBb2 values
+            self.storedAlph(mod(self.iter - 1, self.memory) + 1) = alphBb2;
+            
+            if alphBb2 / alphBb1 < self.tau
+                % Take the minimum value of the stored BB2 step lengths
+                alph = min(self.storedAlph);
             else
                 alph = alphBb1;
             end
-            
-        end % private methods
+        end
         
-    end % class
-end
+    end % private methods
+end % class
