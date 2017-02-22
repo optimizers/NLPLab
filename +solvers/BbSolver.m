@@ -93,7 +93,7 @@ classdef BbSolver < solvers.NlpSolver
                     self.bbFunc = @(xOld, x, gOld, g) ...
                         self.abbMin1(xOld, x, gOld, g);
                     self.storedAlph = inf(self.memory, 1);
-                    self.tau = 0.8;
+                    self.tau = 0.5;
                 otherwise
                     % Default to first BB step length
                     self.bbFunc = @(xOld, x, gOld, g) ...
