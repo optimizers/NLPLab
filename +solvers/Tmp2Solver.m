@@ -68,9 +68,10 @@ classdef Tmp2Solver < solvers.NlpSolver
     properties (SetAccess = private, Hidden = false)
         suffDec;
         maxIterLS; % Maximal number of iterations during linesearch
-        method; % How to compute the descent direction
         fid;
         krylOpts;
+        
+        method;
         
         descDirFunc;
         lsFunc;
@@ -142,8 +143,10 @@ classdef Tmp2Solver < solvers.NlpSolver
             else
                 % Default to PCG
                 self.descDirFunc = @(self, x, g, H, working) ...
-                    self.callPcg(x, working, H, g);
+                    self.callPcg(x, g, H, working);
             end
+            
+            self.method = p.Results.method;
             
             % Setting MinRes, LSQR & LSMR's parameters
             self.krylOpts.etol = self.aOptTol;
@@ -160,12 +163,12 @@ classdef Tmp2Solver < solvers.NlpSolver
             if p.Results.projLS
                 import linesearch.projectedArmijo;
                 self.lsFunc = @(x, f, g, d) ...
-                    linesearch.projectedArmijo(x, f, g, d);
+                    linesearch.projectedArmijo(self, x, f, g, d);
             else
                 % Project the step first!
                 import linesearch.armijo;
                 self.lsFunc = @(x, f, g, d) ...
-                    self.projectThenArmijo(x, f, g, d);
+                    self.projectThenArmijo(self, x, f, g, d);
             end
         end % constructor
         
@@ -185,10 +188,8 @@ classdef Tmp2Solver < solvers.NlpSolver
             % Output Log
             if self.verbose >= 2
                 extra = containers.Map( ...
-                    {'suffDec', 'method', 'corrections', 'damped', ...
-                    'maxIterLS'}, ...
-                    {self.suffDec, self.method, self.corrections, ...
-                    self.damped, self.maxIterLS});
+                    {'suffDec', 'method', 'maxIterLS'}, ...
+                    {self.suffDec, self.method, self.maxIterLS});
                 printObj.header(self, extra);
                 self.printf(self.LOG_FORMAT, self.LOG_HEADER{:});
             end
@@ -293,31 +294,31 @@ classdef Tmp2Solver < solvers.NlpSolver
             fprintf(self.fid, varargin{:});
         end
         
-    end % public methods
-    
-    
-    methods (Access = private)
-        
         function x = project(self, x)
             %% Project - project x on the bounds
             % Upper and lower bounds are defined in nlp model
             x = min(max(x, self.nlp.bL), self.nlp.bU);
         end
         
+    end % public methods
+    
+    
+    methods (Access = private)
+        
         function working = working(self, x, g)
             %% Working - compute set of 'working' variables
             % true  = variable didn't reach its bound and can be improved
             
             % Find binding set
-            working = ~((x <= self.nlp.bL & g >= 0) | ...
-                (x <= self.nlp.bU & g <= 0));
+            working = ~((x == self.nlp.bL & g > 0) | ...
+                (x == self.nlp.bU & g < 0));
         end
         
-        function d = callPcg(self, ~, working, g, H)
+        function d = callPcg(self, ~, g, H, working)
             %% CallPcg
             % Simple wrapper function to get rid of PCG's output message
             % Second argout disables message
-            [d(working), ~] = pcg(H(working, working), -g(working), ...
+            [d, ~] = pcg(H(working, working), -g(working), ...
                 self.rOptTol + self.aOptTol, self.krylOpts.itnlim);
         end
         
