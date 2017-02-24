@@ -8,6 +8,7 @@ classdef PnbSolver < solvers.NlpSolver
         lsFunc; % Line search function
         exactLS;
         descDirFunc;
+        krylOpts;
     end
     
     properties (Hidden = true, Constant)
@@ -31,7 +32,7 @@ classdef PnbSolver < solvers.NlpSolver
             p.addParameter('maxIterLS', 50); % Max iters for line search
             p.addParameter('exactLS', false);
             p.addParameter('fid', 1);
-%             p.addParameter('precond', false);
+            %             p.addParameter('precond', false);
             p.addParameter('method', 'pcg');
             
             p.parse(varargin{:});
@@ -42,7 +43,18 @@ classdef PnbSolver < solvers.NlpSolver
             self.maxIterLS = p.Results.maxIterLS;
             self.exactLS = p.Results.exactLS;
             self.fid = p.Results.fid;
-%             precond = p.Results.precond;
+            %             precond = p.Results.precond;
+            
+            % Setting MinRes, LSQR & LSMR's parameters
+            self.krylOpts = struct;
+            self.krylOpts.etol = self.aOptTol;
+            self.krylOpts.rtol = self.aOptTol;
+            self.krylOpts.atol = self.aOptTol;
+            self.krylOpts.btol = self.aOptTol;
+            self.krylOpts.shift = 0;
+            self.krylOpts.show = false;
+            self.krylOpts.check = false;
+            self.krylOpts.itnlim = self.nlp.n;
             
             % Setting the descent direction computation function
             if strcmp(p.Results.method, 'lsqr')
@@ -51,26 +63,27 @@ classdef PnbSolver < solvers.NlpSolver
                     error(['nlp must be a model.LeastSquaresModel in', ...
                         ' order to use LSQR.']);
                 end
+                import krylov.lsqr_spot;
                 self.descDirFunc = @(self, x, g, H, working) ...
-                    lsqr_spot(self.nlp.A(:, working), self.nlp.b, ...
-                    self.krylOpts) - x;
+                    self.callLsqr(x, working);
             elseif strcmp(p.Results.method, 'lsmr')
                 % LSMR - NlpModel must be a LeastSquaresModel!
                 if  ~isa(nlp, 'model.LeastSquaresModel')
                     error(['nlp must be a model.LeastSquaresModel in', ...
                         ' order to use LSMR.']);
                 end
+                import krylov.lsmr_spot;
                 self.descDirFunc = @(self, x, g, H, working) ...
-                    lsmr_spot(self.nlp.A(:, working), self.nlp.b, ...
-                    self.krylOpts) - x;
+                    self.callLsmr(x, working);
             elseif strcmp(p.Results.method, 'minres')
                 % MinRes
+                import krylov.minres_spot;
                 self.descDirFunc = @(self, x, g, H, working) ...
-                    minres_spot(H, -g, self.krylOpts);
+                    self.callMinres(g, H);
             else
                 % Default to PCG
                 self.descDirFunc = @(self, x, g, H, working) ...
-                    self.callPcg(x, g, H, working);
+                    self.callPcg(g, H);
             end
             
             % Exact line search is only implemented for quadratic or least
@@ -86,16 +99,16 @@ classdef PnbSolver < solvers.NlpSolver
                     self.restrictedArmijo(xNew, x, f, g, d, H, working);
             end
             
-%             if strcmp(precond, 'precBCCB')
-%                 self.descDirFunc = @(g, H, working) ...
-%                     self.precNewtonDir(g, H, working);
-%             elseif strcmp(precond, 'precD')
-%                 self.descDirFunc = @(g, H, working) ...
-%                     self.precNewtonDir2(g, H, working);
-%             else
-%                 self.descDirFunc = @(g, H, working) ...
-%                     self.newtonDir(g, H);
-%             end
+            %             if strcmp(precond, 'precBCCB')
+            %                 self.descDirFunc = @(g, H, working) ...
+            %                     self.precNewtonDir(g, H, working);
+            %             elseif strcmp(precond, 'precD')
+            %                 self.descDirFunc = @(g, H, working) ...
+            %                     self.precNewtonDir2(g, H, working);
+            %             else
+            %                 self.descDirFunc = @(g, H, working) ...
+            %                     self.newtonDir(g, H);
+            %             end
             
             import utils.PrintInfo;
         end % constructor
@@ -172,12 +185,13 @@ classdef PnbSolver < solvers.NlpSolver
                 
                 % We can truncate x, g and H as we are only working on the
                 % free variables.
+                fullX = x;
                 x = x(working);
                 g = g(working);
                 H = H(working, working);
                 
                 % Compute Newton direction for free variables only
-                d = self.descDirFunc(self, x, g, H, working);
+                d = self.descDirFunc(self, fullX, g, H, working);
                 
                 % Compute restricted projected Armijo line search
                 xNew = self.lsFunc(xNew, x, f, g, d, H, working);
@@ -255,7 +269,7 @@ classdef PnbSolver < solvers.NlpSolver
             % identify more variables that should be fixed.
             
             % Compute a Newton direction from reduced g & H
-            d = self.descDirFunc(self, x(~gFixed), ...
+            d = self.descDirFunc(self, x, ...
                 g(~gFixed), H(~gFixed, ~gFixed), ~gFixed);
             
             % We restrict x to the free variables
@@ -270,45 +284,8 @@ classdef PnbSolver < solvers.NlpSolver
             working = ~fixed;
         end
         
-        function working = getWorkingSet2(self, x, g, H)
-            %% GetWorkingSet - Finds the fixed set for proj. Newton step
-            % Using TMP's weird definition
-            % Inputs:
-            %   - x: current point
-            %   - g: gradient at current point
-            %   - H: hessian at current point
-            % Outputs:
-            %   - working: bool array of free variables
-            
-            % Find gradient fixed set
-            gFixed = (x == self.nlp.bL & g > 0) | ...
-                (x == self.nlp.bU & g < 0);
-            
-            % Save gradient fixed set
-            fixed = gFixed;
-            
-            % However, we will later compute a Newton direction instead of
-            % a steepest descent direction. Therefore, computing a Newton
-            % direction on the remaining free variables can help us
-            % identify more variables that should be fixed.
-            
-            % Compute a Newton direction from reduced g & H
-            d = self.descDirFunc(g(~gFixed), H(~gFixed, ~gFixed), ~gFixed);
-            
-            % We restrict x to the free variables
-            x = x(~gFixed);
-            
-            % Update the gradient fixed set with the Newton fixed set
-            % fixed := gradient fixed set | Newton fixed set
-            fixed(~gFixed) = (x == self.nlp.bL(~gFixed) & d < 0) | ...
-                (x == self.nlp.bU(~gFixed) & d > 0);
-            
-            % Finally, the working set represents the free variables
-            working = ~fixed;
-        end
-        
-        function d = callPcg(self, ~, g, H, ~)
-            %% NewtonDir - computes a Newton descent direction
+        function d = callPcg(self, g, H)
+            %% CallPcg
             % Solves the equation H * d = -g, using the gradient and
             % hessian provided as input arguments, assuming they are of
             % reduced size. This descent direction should only be computed
@@ -318,35 +295,68 @@ classdef PnbSolver < solvers.NlpSolver
             [d, ~] = pcg(H, -g, self.aOptTol + self.rOptTol, self.nlp.n);
         end
         
-%         function d = precNewtonDir(self, g, H, working)
-%             %% NewtonDir - computes a Newton descent direction
-%             % Solves the equation H * d = -g, using the gradient and
-%             % hessian provided as input arguments, assuming they are of
-%             % reduced size. This descent direction should only be computed
-%             % on the free variables.
-%             
-%             % Handle to hessian preconditionner
-%             precFunc = @(v) self.nlp.hessPrecBCCB(working, v);
-%             
-%             % Different methods could be used. Using PCG for now.
-%             [d, ~] = pcg(H, -g, self.aOptTol + self.rOptTol, ...
-%                 max(1e4, self.nlp.n), precFunc);
-%         end
-%         
-%         function d = precNewtonDir2(self, g, H, working)
-%             %% NewtonDir - computes a Newton descent direction
-%             % Solves the equation H * d = -g, using the gradient and
-%             % hessian provided as input arguments, assuming they are of
-%             % reduced size. This descent direction should only be computed
-%             % on the free variables.
-%             
-%             % Handle to hessian preconditionner
-%             precFunc = @(v) self.nlp.hessPrecD(working, v);
-%             
-%             % Different methods could be used. Using PCG for now.
-%             [d, ~] = pcg(H, -g, self.aOptTol + self.rOptTol, ...
-%                 max(1e4, self.nlp.n), precFunc);
-%         end
+        function d = callMinres(self, g, H)
+            %% CallMinres
+            % Solves the equation H * d = -g, using the gradient and
+            % hessian provided as input arguments, assuming they are of
+            % reduced size. This descent direction should only be computed
+            % on the free variables.
+            d = krylov.minres_spot(H, -g, self.krylOpts);
+        end
+        
+        function d = callLsqr(self, x, working)
+            %% CallLsqr
+            % Solves the equation H * d = -g, using LSQR. Special functions
+            % are defined in the LeastSquaresModel that allow a correct
+            % call to LSQR & LSMR. The user must provide A and A*x-b from
+            % the objective function ||A*x - b||^2.
+            
+            temp = -self.nlp.getResidual(x);
+            d = krylov.lsqr_spot(self.nlp.A(:, working), temp, ...
+                self.krylOpts);
+        end
+        
+        function d = callLsmr(self, x, working)
+            %% CallLsmr
+            % Solves the equation H * d = -g, using LSQR. Special functions
+            % are defined in the LeastSquaresModel that allow a correct
+            % call to LSQR & LSMR. The user must provide A and A*x-b from
+            % the objective function ||A*x - b||^2.
+            
+            temp = -self.nlp.getResidual(x);
+            d = krylov.lsmr_spot(self.nlp.A(:, working), temp, ...
+                self.krylOpts);
+        end
+        
+        %         function d = precNewtonDir(self, g, H, working)
+        %             %% NewtonDir - computes a Newton descent direction
+        %             % Solves the equation H * d = -g, using the gradient and
+        %             % hessian provided as input arguments, assuming they are of
+        %             % reduced size. This descent direction should only be computed
+        %             % on the free variables.
+        %
+        %             % Handle to hessian preconditionner
+        %             precFunc = @(v) self.nlp.hessPrecBCCB(working, v);
+        %
+        %             % Different methods could be used. Using PCG for now.
+        %             [d, ~] = pcg(H, -g, self.aOptTol + self.rOptTol, ...
+        %                 max(1e4, self.nlp.n), precFunc);
+        %         end
+        %
+        %         function d = precNewtonDir2(self, g, H, working)
+        %             %% NewtonDir - computes a Newton descent direction
+        %             % Solves the equation H * d = -g, using the gradient and
+        %             % hessian provided as input arguments, assuming they are of
+        %             % reduced size. This descent direction should only be computed
+        %             % on the free variables.
+        %
+        %             % Handle to hessian preconditionner
+        %             precFunc = @(v) self.nlp.hessPrecD(working, v);
+        %
+        %             % Different methods could be used. Using PCG for now.
+        %             [d, ~] = pcg(H, -g, self.aOptTol + self.rOptTol, ...
+        %                 max(1e4, self.nlp.n), precFunc);
+        %         end
         
         function xNew = restrictedArmijo(self, xNew, x, f, g, d, ~, ...
                 working)

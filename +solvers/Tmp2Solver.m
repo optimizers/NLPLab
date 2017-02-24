@@ -123,32 +123,33 @@ classdef Tmp2Solver < solvers.NlpSolver
                     error(['nlp must be a model.LeastSquaresModel in', ...
                         ' order to use LSQR.']);
                 end
+                import krylov.lsqr_spot;
                 self.descDirFunc = @(self, x, g, H, working) ...
-                    lsqr_spot(self.nlp.A(:, working), self.nlp.b, ...
-                    self.krylOpts) - x(working);
+                    self.callLsqr(x, working);
             elseif strcmp(p.Results.method, 'lsmr')
                 % LSMR - NlpModel must be a LeastSquaresModel!
                 if  ~isa(nlp, 'model.LeastSquaresModel')
                     error(['nlp must be a model.LeastSquaresModel in', ...
                         ' order to use LSMR.']);
                 end
+                import krylov.lsmr_spot;
                 self.descDirFunc = @(self, x, g, H, working) ...
-                    lsmr_spot(self.nlp.A(:, working), self.nlp.b, ...
-                    self.krylOpts) - x(working);
+                    self.callLsmr(x, working);
             elseif strcmp(p.Results.method, 'minres')
                 % MinRes
+                import krylov.minres_spot;
                 self.descDirFunc = @(self, x, g, H, working) ...
-                    minres_spot(H(working, working), -g(working), ...
-                    self.krylOpts);
+                    self.callMinres(g, H, working);
             else
                 % Default to PCG
                 self.descDirFunc = @(self, x, g, H, working) ...
-                    self.callPcg(x, g, H, working);
+                    self.callPcg(g, H, working);
             end
             
             self.method = p.Results.method;
             
             % Setting MinRes, LSQR & LSMR's parameters
+            self.krylOpts = struct;
             self.krylOpts.etol = self.aOptTol;
             self.krylOpts.rtol = self.aOptTol;
             self.krylOpts.atol = self.aOptTol;
@@ -247,7 +248,6 @@ classdef Tmp2Solver < solvers.NlpSolver
                 d = zeros(self.nlp.n, 1);
                 % Solve H * d = -g on the working variables
                 d(working) = self.descDirFunc(self, x, g, H, working);
-                
                 % Check that progress can be made along the direction
                 gtd = g' * d;
                 if gtd > -self.aOptTol * norm(g) * norm(d) - self.aOptTol
@@ -314,12 +314,50 @@ classdef Tmp2Solver < solvers.NlpSolver
                 (x == self.nlp.bU & g < 0));
         end
         
-        function d = callPcg(self, ~, g, H, working)
+        function d = callPcg(self, g, H, working)
             %% CallPcg
-            % Simple wrapper function to get rid of PCG's output message
-            % Second argout disables message
+            % Solves the equation H * d = -g, using the gradient and
+            % hessian provided as input arguments, assuming they are of
+            % reduced size. This descent direction should only be computed
+            % on the free variables.
+            
+            % Different methods could be used. Using PCG for now.
             [d, ~] = pcg(H(working, working), -g(working), ...
-                self.rOptTol + self.aOptTol, self.krylOpts.itnlim);
+                self.aOptTol + self.rOptTol, self.nlp.n);
+        end
+        
+        function d = callMinres(self, g, H, working)
+            %% CallMinres
+            % Solves the equation H * d = -g, using the gradient and
+            % hessian provided as input arguments, assuming they are of
+            % reduced size. This descent direction should only be computed
+            % on the free variables.
+            d = krylov.minres_spot(H(working, working), -g(working), ...
+                self.krylOpts);
+        end
+        
+        function d = callLsqr(self, x, working)
+            %% CallLsqr
+            % Solves the equation H * d = -g, using LSQR. Special functions
+            % are defined in the LeastSquaresModel that allow a correct
+            % call to LSQR & LSMR. The user must provide A and A*x-b from
+            % the objective function ||A*x - b||^2.
+            
+            temp = -self.nlp.getResidual(x);
+            d = krylov.lsqr_spot(self.nlp.A(:, working), temp, ...
+                self.krylOpts);
+        end
+        
+        function d = callLsmr(self, x, working)
+            %% CallLsmr
+            % Solves the equation H * d = -g, using LSQR. Special functions
+            % are defined in the LeastSquaresModel that allow a correct
+            % call to LSQR & LSMR. The user must provide A and A*x-b from
+            % the objective function ||A*x - b||^2.
+            
+            temp = -self.nlp.getResidual(x);
+            d = krylov.lsmr_spot(self.nlp.A(:, working), temp, ...
+                self.krylOpts);
         end
         
         function [x, f, failed, t] = projectThenArmijo(self, x, f, g, d)

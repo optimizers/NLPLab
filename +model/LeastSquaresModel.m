@@ -40,6 +40,12 @@ classdef LeastSquaresModel < model.NlpModel
             self.C = C;
         end
         
+        function r = getResidual(self, x)
+            %% GetResidual
+            % Return the value of Ax - b
+            r = self.A * x - self.b;
+        end
+        
         function [fObj, grad, hess] = obj(self, x)
             %% Function returning the obj. func, grad. and hess.
             if nargout == 1
@@ -90,7 +96,7 @@ classdef LeastSquaresModel < model.NlpModel
         function w = hconprod_local(self, ~, ~, ~)
             w = sparse(self.n, 1);
         end
-
+        
     end
     
 end
