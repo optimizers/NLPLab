@@ -354,6 +354,8 @@ classdef CflashSolver < solvers.NlpSolver
                 self.stats.proj.info = [self.stats.proj.info; temp];
                 self.stats.proj.exit{end + 1} = ...
                     solver.EXIT_MSG{solver.iStop};
+                % Keep track of the clock
+                self.stats.clock = self.clock;
             end
         end
         
