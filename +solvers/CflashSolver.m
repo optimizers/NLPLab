@@ -48,6 +48,7 @@ classdef CflashSolver < solvers.NlpSolver
         maxIterLS;
         
         clock;
+        maxExtraIter;
     end
     
     properties (Hidden = true, Constant)
@@ -108,6 +109,7 @@ classdef CflashSolver < solvers.NlpSolver
             p.addParameter('backtracking', false);
             p.addParameter('maxIterLS', 10);
             p.addParameter('suffDec', 1e-4);
+            p.addParameter('maxExtraIter', 5);
             
             p.parse(varargin{:});
             
@@ -125,6 +127,7 @@ classdef CflashSolver < solvers.NlpSolver
             self.backtracking = p.Results.backtracking;
             self.suffDec = p.Results.suffDec;
             self.maxIterLS = p.Results.maxIterLS;
+            self.maxExtraIter = p.Results.maxExtraIter;
             
             if self.backtracking
                 import linesearch.projectedArmijo;
@@ -499,9 +502,10 @@ classdef CflashSolver < solvers.NlpSolver
                 % Increase alph until a successful step is found.
                 search = true;
                 alphas = alph;
+                iter = 1;
                 while search && (alph <= brptMax) && ...
                         (toc(self.solveTime) < self.maxRT) && ...
-                        ~self.iStop
+                        ~self.iStop && iter <= self.maxExtraIter
                     % This is a crude extrapolation procedure that
                     % will be replaced in future versions of the code.
                     alph = extrapf * alph;
@@ -518,6 +522,7 @@ classdef CflashSolver < solvers.NlpSolver
                     else
                         search = false;
                     end
+                    iter = iter + 1;
                 end
                 % Recover the last successful step.
                 alph = alphas;
@@ -577,8 +582,10 @@ classdef CflashSolver < solvers.NlpSolver
             % satisfied or x + alph*w is feasible.
             self.logger.debug('Interpolating');
             t = tic;
+            iter = 1;
             while true && (alph > brptMin) && ...
-                    (toc(self.solveTime) < self.maxRT) && ~self.iStop
+                    (toc(self.solveTime) < self.maxRT) && ~self.iStop ...
+                    && iter <= self.maxExtraIter
                 
                 % Calculate P[x + alph*w] - x and check the sufficient
                 % decrease condition.
@@ -592,6 +599,7 @@ classdef CflashSolver < solvers.NlpSolver
                     % will be replaced in future versions of the code.
                     alph = interpf * alph;
                 end
+                iter = iter + 1;
             end
             self.clock.spcg.prsrch.interp = self.clock.spcg.prsrch.interp + toc(t);
             % Force at least one more constraint to be added to the active
