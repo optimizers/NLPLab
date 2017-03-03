@@ -342,44 +342,41 @@ classdef BcflashSolver < solvers.NlpSolver
                 interp = true;
             else
                 gts = g'*s;
-                q = 0.5*s'*H*s + gts;
-                interp = (q >= self.mu0*gts);
+                interp = (0.5*s'*H*s + gts >= self.mu0*gts);
             end
             
             % Either interpolate or extrapolate to find a successful step.
             if interp
                 % Reduce alph until a successful step is found.
-                search = true;
-                while search && (toc(self.solveTime) < self.maxRT)
+                while (toc(self.solveTime) < self.maxRT)
                     % This is a crude interpolation procedure that
                     % will be replaced in future versions of the code.
                     alph = interpf * alph;
                     s = self.gpstep(x, -alph, g);
                     if norm(s) <= delta
                         gts = g'*s;
-                        q = 0.5*s'*H*s + gts;
-                        search = (q >= self.mu0*gts);
+                        if 0.5 * s'*H*s + gts < self.mu0 * gts
+                            break
+                        end
                     end
                 end
             else
                 % Increase alph until a successful step is found.
-                search = true;
                 alphs = alph;
-                while search && (alph <= brptMax) && ...
+                while (alph <= brptMax) && ...
                         (toc(self.solveTime) < self.maxRT)
                     % This is a crude extrapolation procedure that
                     % will be replaced in future versions of the code.
                     alph = extrapf * alph;
                     s = self.gpstep(x, -alph, g);
                     if norm(s) <= delta
-                        gts = g'*s;
-                        q = 0.5*s'*H*s + gts;
-                        if q <= self.mu0*gts
-                            search = true;
-                            alphs = alph;
+                        gts = g' * s;
+                        if 0.5 * s'*H*s + gts > self.mu0 * gts
+                            break
                         end
+                        alphs = alph;
                     else
-                        search = false;
+                        break
                     end
                 end
                 % Recover the last successful step.
@@ -438,20 +435,17 @@ classdef BcflashSolver < solvers.NlpSolver
             
             % Reduce alph until the sufficient decrease condition is
             % satisfied or x + alph*w is feasible.
-            while true && (alph > brptMin) && ...
-                    (toc(self.solveTime) < self.maxRT)
-                
+            while (alph > brptMin) && (toc(self.solveTime) < self.maxRT)
                 % Calculate P[x + alph*w] - x and check the sufficient
                 % decrease condition.
                 s = self.gpstep(x, alph, w, indFree);
                 gts = g' * s;
                 if 0.5 * s'*H*s + gts <= self.mu0 * gts
                     break;
-                else
-                    % This is a crude interpolation procedure that
-                    % will be replaced in future versions of the code.
-                    alph = interpf * alph;
                 end
+                % This is a crude interpolation procedure that
+                % will be replaced in future versions of the code.
+                alph = interpf * alph;
             end
             
             % Force at least one more constraint to be added to the active
@@ -519,10 +513,10 @@ classdef BcflashSolver < solvers.NlpSolver
             %
             %      info = 3  Failure to converge within iterMax iters.
             
-            % Compute H*(x[1] - x[0]) and store in w.
+            % x[1] = xC = x + s => x[1] - x[0] = s <=> H*(x[1]-x[0]) = H*s
             Hs = H * s;
-            % Compute the Cauchy point.
-            x = self.project(x + s);
+            % Compute the Cauchy point
+            x = x + s;
             
             % Start the main iter loop.
             % There are at most n iters because at each iter

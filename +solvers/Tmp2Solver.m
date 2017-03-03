@@ -75,6 +75,8 @@ classdef Tmp2Solver < solvers.NlpSolver
         
         descDirFunc;
         lsFunc;
+        saveD = {};
+        saveRnorm = {};
     end % private properties
     
     properties (Hidden = true, Constant)
@@ -116,6 +118,19 @@ classdef Tmp2Solver < solvers.NlpSolver
             self.maxIterLS = p.Results.maxIterLS;
             self.fid = p.Results.fid;
             
+            self.method = p.Results.method;
+            
+            % Setting MinRes, LSQR & LSMR's parameters
+            self.krylOpts = struct;
+            self.krylOpts.etol = self.aOptTol;
+            self.krylOpts.rtol = self.aOptTol;
+            self.krylOpts.atol = self.aOptTol;
+            self.krylOpts.btol = self.aOptTol;
+            self.krylOpts.shift = 0;
+            self.krylOpts.show = false;
+            self.krylOpts.check = false;
+            self.krylOpts.itnlim = self.nlp.n;
+            
             % Setting the descent direction computation function
             if strcmp(p.Results.method, 'lsqr')
                 % LSQR - NlpModel must be a LeastSquaresModel!
@@ -123,6 +138,10 @@ classdef Tmp2Solver < solvers.NlpSolver
                     error(['nlp must be a model.LeastSquaresModel in', ...
                         ' order to use LSQR.']);
                 end
+                self.krylOpts.etol = self.aOptTol * 10^-5;
+                self.krylOpts.rtol = self.aOptTol * 10^-5;
+                self.krylOpts.atol = self.aOptTol * 10^-5;
+                self.krylOpts.btol = self.aOptTol * 10^-5;
                 import krylov.lsqr_spot;
                 self.descDirFunc = @(self, x, g, H, working) ...
                     self.callLsqr(x, working);
@@ -132,6 +151,10 @@ classdef Tmp2Solver < solvers.NlpSolver
                     error(['nlp must be a model.LeastSquaresModel in', ...
                         ' order to use LSMR.']);
                 end
+                self.krylOpts.etol = self.aOptTol * 10^-5;
+                self.krylOpts.rtol = self.aOptTol * 10^-5;
+                self.krylOpts.atol = self.aOptTol * 10^-5;
+                self.krylOpts.btol = self.aOptTol * 10^-5;
                 import krylov.lsmr_spot;
                 self.descDirFunc = @(self, x, g, H, working) ...
                     self.callLsmr(x, working);
@@ -145,19 +168,6 @@ classdef Tmp2Solver < solvers.NlpSolver
                 self.descDirFunc = @(self, x, g, H, working) ...
                     self.callPcg(g, H, working);
             end
-            
-            self.method = p.Results.method;
-            
-            % Setting MinRes, LSQR & LSMR's parameters
-            self.krylOpts = struct;
-            self.krylOpts.etol = self.aOptTol;
-            self.krylOpts.rtol = self.aOptTol;
-            self.krylOpts.atol = self.aOptTol;
-            self.krylOpts.btol = self.aOptTol;
-            self.krylOpts.shift = 0;
-            self.krylOpts.show = false;
-            self.krylOpts.check = false;
-            self.krylOpts.itnlim = self.nlp.n;
             
             import utils.PrintInfo;
             
@@ -248,6 +258,7 @@ classdef Tmp2Solver < solvers.NlpSolver
                 d = zeros(self.nlp.n, 1);
                 % Solve H * d = -g on the working variables
                 d(working) = self.descDirFunc(self, x, g, H, working);
+
                 % Check that progress can be made along the direction
                 gtd = g' * d;
                 if gtd > -self.aOptTol * norm(g) * norm(d) - self.aOptTol
@@ -322,8 +333,11 @@ classdef Tmp2Solver < solvers.NlpSolver
             % on the free variables.
             
             % Different methods could be used. Using PCG for now.
-            [d, ~] = pcg(H(working, working), -g(working), ...
+            [d, ~, ~, ~, resvec] = pcg(H(working, working), -g(working), ...
                 self.aOptTol + self.rOptTol, self.nlp.n);
+            
+            self.saveD{self.iter} = d;
+            self.saveRnorm{self.iter} = resvec;
         end
         
         function d = callMinres(self, g, H, working)
@@ -332,8 +346,11 @@ classdef Tmp2Solver < solvers.NlpSolver
             % hessian provided as input arguments, assuming they are of
             % reduced size. This descent direction should only be computed
             % on the free variables.
-            d = krylov.minres_spot(H(working, working), -g(working), ...
+            [d, ~, stats] = krylov.minres_spot(H(working, working), -g(working), ...
                 self.krylOpts);
+            
+            self.saveD{self.iter} = d;
+            self.saveRnorm{self.iter} = stats.resvec;
         end
         
         function d = callLsqr(self, x, working)
@@ -344,8 +361,11 @@ classdef Tmp2Solver < solvers.NlpSolver
             % the objective function ||A*x - b||^2.
             
             temp = -self.nlp.getResidual(x);
-            d = krylov.lsqr_spot(self.nlp.A(:, working), temp, ...
+            [d, ~, stats] = krylov.lsqr_spot(self.nlp.A(:, working), temp, ...
                 self.krylOpts);
+            
+            self.saveD{self.iter} = d;
+            self.saveRnorm{self.iter} = stats.resvec;
         end
         
         function d = callLsmr(self, x, working)
@@ -356,8 +376,11 @@ classdef Tmp2Solver < solvers.NlpSolver
             % the objective function ||A*x - b||^2.
             
             temp = -self.nlp.getResidual(x);
-            d = krylov.lsmr_spot(self.nlp.A(:, working), temp, ...
+            [d, ~, stats] = krylov.lsmr_spot(self.nlp.A(:, working), temp, ...
                 self.krylOpts);
+            
+            self.saveD{self.iter} = d;
+            self.saveRnorm{self.iter} = stats.resvec;
         end
         
         function [x, f, failed, t] = projectThenArmijo(self, x, f, g, d)
