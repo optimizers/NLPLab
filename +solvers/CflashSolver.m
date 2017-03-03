@@ -136,11 +136,13 @@ classdef CflashSolver < solvers.NlpSolver
             import utils.PrintInfo;
             
             self.stats.proj = struct;
-            self.stats.proj.info = [0, 0, 0, 0, 0, 0, 0];
-            self.stats.proj.infoHeader = ...
-                {'nProj', 'iter', 'nObjFunc', 'nGrad', 'nHess', ...
-                'pgNorm', 'solveTime'};
-            self.stats.proj.exit = {};
+            self.stats.proj.info = [0, 0];
+            self.stats.proj.infoHeader = {'avg pgNorm', 'avg solveTime'};
+%             self.stats.proj.info = [0, 0, 0, 0, 0, 0, 0];
+%             self.stats.proj.infoHeader = ...
+%                 {'nProj', 'iter', 'nObjFunc', 'nGrad', 'nHess', ...
+%                 'pgNorm', 'solveTime'};
+%             self.stats.proj.exit = {};
             
             self.stats.rec = struct;
             self.stats.rec.info = [];
@@ -329,6 +331,7 @@ classdef CflashSolver < solvers.NlpSolver
             printObj.footer(self);
             
             self.stats.rec.exit{end + 1} = self.EXIT_MSG{self.iStop};
+            self.stats.clock = self.clock;
         end % solve
         
         function xProj = project(self, x)
@@ -338,25 +341,32 @@ classdef CflashSolver < solvers.NlpSolver
                 % Propagate throughout the program to exit
                 self.iStop = self.EXIT_PROJ_FAILURE;
             end
-            
-            self.nProj = self.nProj + 1;
-            
             % This can be removed later
             if isprop(self.nlp, 'projSolver')
                 solver = self.nlp.projSolver;
-                temp = [self.nProj, solver.iter, solver.nObjFunc, ...
-                    solver.nGrad, solver.nHess, solver.pgNorm, ...
-                    solver.solveTime];
-                temp(2 : end - 2) = temp(2 : end - 2) + ...
-                    self.stats.proj.info(end, 2 : end - 2);
-                temp(end) = temp(end) + self.stats.proj.info(end, end);
-                % Collecting statistics
-                self.stats.proj.info = [self.stats.proj.info; temp];
-                self.stats.proj.exit{end + 1} = ...
-                    solver.EXIT_MSG{solver.iStop};
-                % Keep track of the clock
-                self.stats.clock = self.clock;
+                % Cumulative average of ||Pg|| and solve time
+                self.stats.proj.info = (self.nProj*self.stats.proj.info ...
+                    + [solver.pgNorm, solver.solveTime])/(self.nProj + 1);
             end
+            
+            self.nProj = self.nProj + 1;
+            
+            %             self.nProj = self.nProj + 1;
+            %
+            %             % This can be removed later
+            %             if isprop(self.nlp, 'projSolver')
+            %                 solver = self.nlp.projSolver;
+            %                 temp = [self.nProj, solver.iter, solver.nObjFunc, ...
+            %                     solver.nGrad, solver.nHess, solver.pgNorm, ...
+            %                     solver.solveTime];
+            %                 temp(2 : end - 2) = temp(2 : end - 2) + ...
+            %                     self.stats.proj.info(end, 2 : end - 2);
+            %                 temp(end) = temp(end) + self.stats.proj.info(end, end);
+            %                 % Collecting statistics
+            %                 self.stats.proj.info = [self.stats.proj.info; temp];
+            %                 self.stats.proj.exit{end + 1} = ...
+            %                     solver.EXIT_MSG{solver.iStop};
+            %             end
         end
         
     end % public methods
@@ -473,8 +483,7 @@ classdef CflashSolver < solvers.NlpSolver
                 interp = true;
             else
                 gts = g'*s;
-                q = 0.5 * s'*H*s + gts;
-                interp = (q >= self.mu0 * gts);
+                interp = (0.5 * s'*H*s + gts >= self.mu0 * gts);
             end
             
             % Either interpolate or extrapolate to find a successful step.
@@ -482,9 +491,7 @@ classdef CflashSolver < solvers.NlpSolver
                 t = tic;
                 self.logger.debug('Interpolating');
                 % Reduce alph until a successful step is found.
-                search = true;
-                while search && (toc(self.solveTime) < self.maxRT) && ...
-                        ~self.iStop
+                while (toc(self.solveTime) < self.maxRT) && ~self.iStop
                     % This is a crude interpolation procedure that
                     % will be replaced in future versions of the code.
                     alph = interpf * alph;
@@ -493,8 +500,9 @@ classdef CflashSolver < solvers.NlpSolver
                     self.logger.debug(sprintf('\t||s|| = %7.3e', sNorm));
                     if sNorm <= delta
                         gts = g'*s;
-                        q = 0.5 * s'*H*s + gts;
-                        search = (q >= self.mu0 * gts);
+                        if 0.5 * s'*H*s + gts < self.mu0 * gts
+                            break
+                        end
                     end
                 end
                 self.clock.cauchy.interp = self.clock.cauchy.interp + toc(t);
@@ -502,10 +510,9 @@ classdef CflashSolver < solvers.NlpSolver
                 t = tic;
                 self.logger.debug('Extrapolating');
                 % Increase alph until a successful step is found.
-                search = true;
                 alphas = alph;
                 iter = 1;
-                while search && (alph <= brptMax) && ...
+                while (alph <= brptMax) && ...
                         (toc(self.solveTime) < self.maxRT) && ...
                         ~self.iStop && iter <= self.maxExtraIter
                     % This is a crude extrapolation procedure that
@@ -517,13 +524,14 @@ classdef CflashSolver < solvers.NlpSolver
                     if sNorm <= delta
                         gts = g' * s;
                         q = 0.5 * s'*H*s + gts;
-                        if q <= self.mu0 * gts
-                            search = true;
-                            alphas = alph;
+                        if q > self.mu0 * gts
+                            break
                         end
+                        alphas = alph;
                     else
-                        search = false;
+                        break
                     end
+                    extrapf = extrapf^2;
                     iter = iter + 1;
                 end
                 % Recover the last successful step.
@@ -585,7 +593,7 @@ classdef CflashSolver < solvers.NlpSolver
             self.logger.debug('Interpolating');
             t = tic;
             iter = 1;
-            while true && (alph > brptMin) && ...
+            while (alph > brptMin) && ...
                     (toc(self.solveTime) < self.maxRT) && ~self.iStop ...
                     && iter <= self.maxExtraIter
                 
@@ -596,11 +604,11 @@ classdef CflashSolver < solvers.NlpSolver
                 gts = g' * s;
                 if 0.5 * s'*H*s + gts <= self.mu0 * gts
                     break;
-                else
-                    % This is a crude interpolation procedure that
-                    % will be replaced in future versions of the code.
-                    alph = interpf * alph;
                 end
+                % This is a crude interpolation procedure that
+                % will be replaced in future versions of the code.
+                alph = interpf * alph;
+                interpf = interpf^2;
                 iter = iter + 1;
             end
             self.clock.spcg.prsrch.interp = self.clock.spcg.prsrch.interp + toc(t);

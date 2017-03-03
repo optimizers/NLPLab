@@ -307,6 +307,7 @@ while (itn < itnlim) && ~done
   phibar  =   sn*phibar;
   tau     =   sn*phi;
 
+  
   x_energy_norm2 = x_energy_norm2 + phi*phi;
 
 % Update x and w.

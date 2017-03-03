@@ -26,8 +26,8 @@ classdef BbSolver < solvers.NlpSolver
             'Function Val', '||Pg||'};
         LOG_FORMAT = '%10s %10s %10s %15s %15s %15s\n';
         LOG_BODY = '%10d %10d %10d %15.5e %15.5e %15.5e\n';
-        ALPH_MIN = 1e-3;
-        ALPH_MAX = 1e3;
+        ALPH_MIN = 1e-10;
+        ALPH_MAX = 1e5;
         SIG_1 = 0.1;
         SIG_2 = 0.9;
     end % constant properties
@@ -55,7 +55,7 @@ classdef BbSolver < solvers.NlpSolver
             p = inputParser;
             p.PartialMatching = false;
             p.KeepUnmatched = true;
-            p.addParameter('memory', 10);
+            p.addParameter('memory', 7);
             p.addParameter('fid', 1);
             p.addParameter('suffDec', 1e-4);
             p.addParameter('maxProj', 1e5);
@@ -88,10 +88,15 @@ classdef BbSolver < solvers.NlpSolver
                 case 'ABB'
                     self.bbFunc = @(xOld, x, gOld, g) ...
                         self.abb(xOld, x, gOld, g);
-                    self.tau = 0.15;
+                    self.tau = 0.5;
                 case 'ABBmin1'
                     self.bbFunc = @(xOld, x, gOld, g) ...
                         self.abbMin1(xOld, x, gOld, g);
+                    self.storedAlph = inf(self.memory, 1);
+                    self.tau = 0.15;
+                case 'ABBmin2'
+                    self.bbFunc = @(xOld, x, gOld, g) ...
+                        self.abbMin2(xOld, x, gOld, g);
                     self.storedAlph = inf(self.memory, 1);
                     self.tau = 0.5;
                 otherwise
@@ -101,11 +106,13 @@ classdef BbSolver < solvers.NlpSolver
             end
             
             self.stats.proj = struct;
-            self.stats.proj.info = [0, 0, 0, 0, 0, 0, 0];
-            self.stats.proj.infoHeader = ...
-                {'nProj', 'iter', 'nObjFunc', 'nGrad', 'nHess', ...
-                'pgNorm', 'solveTime'};
-            self.stats.proj.exit = {};
+            self.stats.proj.info = [0, 0];
+            self.stats.proj.infoHeader = {'avg pgNorm', 'avg solveTime'};
+            %             self.stats.proj.info = [0, 0, 0, 0, 0, 0, 0];
+            %             self.stats.proj.infoHeader = ...
+            %                 {'nProj', 'iter', 'nObjFunc', 'nGrad', 'nHess', ...
+            %                 'pgNorm', 'solveTime'};
+            %             self.stats.proj.exit = {};
             
             self.stats.rec = struct;
             self.stats.rec.info = [];
@@ -260,22 +267,25 @@ classdef BbSolver < solvers.NlpSolver
                 self.iStop = self.EXIT_PROJ_FAILURE;
             end
             
-            self.nProj = self.nProj + 1;
-            
             % This can be removed later
             if isprop(self.nlp, 'projSolver')
                 solver = self.nlp.projSolver;
-                temp = [self.nProj, solver.iter, solver.nObjFunc, ...
-                    solver.nGrad, solver.nHess, solver.pgNorm, ...
-                    solver.solveTime];
-                temp(2 : end - 2) = temp(2 : end - 2) + ...
-                    self.stats.proj.info(end, 2 : end - 2);
-                temp(end) = temp(end) + self.stats.proj.info(end, end);
-                % Collecting statistics
-                self.stats.proj.info = [self.stats.proj.info; temp];
-                self.stats.proj.exit{end + 1} = ...
-                    solver.EXIT_MSG{solver.iStop};
+                % Cumulative average of ||Pg|| and solve time
+                self.stats.proj.info = (self.nProj*self.stats.proj.info ...
+                    + [solver.pgNorm, solver.solveTime])/(self.nProj + 1);
+                %                 temp = [self.nProj, solver.iter, solver.nObjFunc, ...
+                %                     solver.nGrad, solver.nHess, solver.pgNorm, ...
+                %                     solver.solveTime];
+                %                 temp(2 : end - 2) = temp(2 : end - 2) + ...
+                %                     self.stats.proj.info(end, 2 : end - 2);
+                %                 temp(end) = temp(end) + self.stats.proj.info(end, end);
+                %                 % Collecting statistics
+                %                 self.stats.proj.info = [self.stats.proj.info; temp];
+                %                 self.stats.proj.exit{end + 1} = ...
+                %                     solver.EXIT_MSG{solver.iStop};
             end
+            
+            self.nProj = self.nProj + 1;
         end
         
         function alph = bbStep(self, xOld, x, gOld, g)
@@ -354,6 +364,40 @@ classdef BbSolver < solvers.NlpSolver
                 alph = min(self.storedAlph);
             else
                 alph = alphBb1;
+            end
+        end
+        
+        function alph = abbMin2(self, xOld, x, gOld, g)
+            %% "Min" Adaptive Barzilai-Borwein
+            % According to the procedure described in Frassoldati, Zanni,
+            % Zanghirati.
+            
+            % Evaluate both step lengths
+            s = x - xOld;
+            y = g - gOld;
+            
+           bet = (s' * y);
+           
+           if bet <= 0
+               alphBb1 = self.ALPH_MAX;
+               alphBb2 = self.ALPH_MAX;
+           else
+              alphBb1 = max([self.ALPH_MIN, ...
+                  min([(s' * s) / (s' * y), self.ALPH_MAX])]);
+              alphBb2 = max([self.ALPH_MIN, ...
+                  min([(s' * y) / (y' * y), self.ALPH_MAX])]);
+           end
+            
+            % Update stored alphBb2 values
+            self.storedAlph(mod(self.iter - 1, self.memory) + 1) = alphBb2;
+            
+            if alphBb2 / alphBb1 <= self.tau
+                % Take the minimum value of the stored BB2 step lengths
+                alph = min(self.storedAlph);
+                self.tau = self.tau * 0.9;
+            else
+                alph = alphBb1;
+                self.tau = self.tau * 1.1;
             end
         end
         
