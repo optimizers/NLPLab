@@ -682,8 +682,11 @@ classdef CflashSolver < solvers.NlpSolver
             Hs = H * s;
             % Norm of obj. func. gradient is a stopping criteria
             gNorm = norm(g);
-            % Compute the Cauchy point.
-            x = self.project(x + s);
+            % Compute the Cauchy point. This point should already respect
+            % the constraint set. Project the point
+            % x = self.nlp.project(x + s);
+            % if there are risks of rounding errors.
+            x = x + s; 
             
             % Start the main iter loop.
             % There are at most n iterations because at each iter
@@ -708,7 +711,7 @@ classdef CflashSolver < solvers.NlpSolver
                 tol = self.cgTol * gNorm;
                 t = tic;
                 [w, iterTR, infotr] = self.trpcg(H, gQuad, delta, ...
-                    tol, self.maxIterCg, indFree);
+                    tol, self.maxIterCg, indFree, s);
                 self.clock.spcg.trpcg.all = self.clock.spcg.trpcg.all + toc(t);
                 iters = iters + iterTR;
                 
@@ -776,7 +779,7 @@ classdef CflashSolver < solvers.NlpSolver
         end
         
         function [w, iters, info] = trpcg(self, H, g, delta, ...
-                tol, iterMax, indFree)
+                tol, iterMax, indFree, s)
             %% TRPCG
             % This subroutine uses a truncated conjugate gradient method to
             % find an approximate minimizer of the trust-region subproblem
@@ -859,7 +862,7 @@ classdef CflashSolver < solvers.NlpSolver
                     alph = 0;
                 end
                 
-                sigma = solvers.CflashSolver.trqsol(w, p, delta);
+                sigma = solvers.CflashSolver.trqsol(w + s, p, delta);
                 % Exit if there is negative curvature or if the
                 % iterates exit the trust region.
                 self.logger.debug(sprintf('\tαCG = %7.1e, σ = %7.1e', ...
