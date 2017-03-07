@@ -459,7 +459,7 @@ classdef BcflashSolver < solvers.NlpSolver
             s = self.gpstep(x, alph, w, indFree); % s = P[x + alph*w] - x
         end % prsrch
         
-        function [x, s, info] = spcg(self, H, x, g, delta, s)
+        function [x, s, info] = spcg(self, H, xk, g, delta, s)
             %% SPCG - Minimize a bound-constraint quadratic
             %
             % This subroutine generates a sequence of approximate
@@ -512,12 +512,9 @@ classdef BcflashSolver < solvers.NlpSolver
             %                not allow further progress.
             %
             %      info = 3  Failure to converge within iterMax iters.
-            
-            % x[1] = xC = x + s => x[1] - x[0] = s <=> H*(x[1]-x[0]) = H*s
             Hs = H * s;
             % Compute the Cauchy point
-            x = x + s;
-            
+            x = xk + s;
             % Start the main iter loop.
             % There are at most n iters because at each iter
             % at least one variable becomes active.
@@ -550,7 +547,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 Hfree = H(indFree, indFree);
                 
                 [w, iterTR, infoTR] = solvers.BcflashSolver.trpcg( ...
-                    Hfree, gFree, delta, tol, self.maxIterCg);
+                    Hfree, gFree, delta, tol, self.maxIterCg, s(indFree));
                 iters = iters + iterTR;
                 
                 % Use a projected search to obtain the next iterate.
@@ -656,7 +653,7 @@ classdef BcflashSolver < solvers.NlpSolver
     
     methods (Access = private, Static)
         
-        function [w, iters, info] = trpcg(H, g, delta, tol, iterMax)
+        function [w, iters, info] = trpcg(H, g, delta, tol, iterMax, s)
             %% TRPCG - Trust-region projected conjugate gradient
             % This subroutine uses a truncated conjugate gradient method to
             % find an approximate minimizer of the trust-region subproblem
@@ -720,7 +717,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 else
                     alph = 0;
                 end
-                sigma = solvers.BcflashSolver.trqsol(w, p, delta);
+                sigma = solvers.BcflashSolver.trqsol(w + s, p, delta);
                 % Exit if there is negative curvature or if the
                 % iterates exit the trust region.
                 if (ptq <= 0 || alph >= sigma)
