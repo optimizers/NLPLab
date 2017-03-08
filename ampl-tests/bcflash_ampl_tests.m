@@ -20,7 +20,8 @@ lookInto = '~/Masters/decoded_ampl_models';
 % File containing the problems name
 problemsFile = './bounds.lst';
 
-[problems, notFound] = findProblems(lookInto, problemsFile);
+import utils.findProblems;
+[problems, notFound] = utils.findProblems(lookInto, problemsFile);
 
 %% Solve the problems with Bcflashsolver
 % Load Bcflash
