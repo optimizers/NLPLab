@@ -74,7 +74,7 @@ classdef BcflashSolver < solvers.NlpSolver
             self.maxIterLS = p.Results.maxIterLS;
             
             if self.backtracking
-                import linesearch.projectedArmijo;
+                import linesearch.armijo;
             end
             
             import utils.PrintInfo;
@@ -199,8 +199,7 @@ classdef BcflashSolver < solvers.NlpSolver
                         break;
                     elseif self.backtracking && ~backtrackAttempted
                         % The step is rejected, but we attempt to backtrack
-                        [x, f] = linesearch.projectedArmijo(self, xc, ...
-                            fc, g, s);
+                        [x, f] = linesearch.armijo(self, xc, fc, g, s);
                         backtrackAttempted = true;
                     else
                         % The step is rejected
