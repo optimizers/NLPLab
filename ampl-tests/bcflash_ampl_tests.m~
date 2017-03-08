@@ -1,0 +1,21 @@
+%% Bcflash test file using AMPL problems
+clc;
+clear all;
+close all;
+
+%% Init
+% Making sure NlpLab is on the path
+addpath('~/Masters/nlplab');
+% Making sure Spot is on the path
+addpath('~/Masters/Spot');
+% Making sure logging4matlab is on the path
+addpath('~/Masters/logging4matlab/');
+% Make sure the ampl-interface is on the path
+addpath('~/Masters/+ampl/');
+
+%% Getting the problems
+
+%% Load the Bcflash solver and solve the problems
+import solvers.BcflashSolver;
+
+end
