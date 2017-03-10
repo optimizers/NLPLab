@@ -96,6 +96,11 @@ classdef AmplModel < model.NlpModel
          H = self.ah.hessobj(x);
       end
       
+      function Hv = hobjprod_local(self, x, ~, v)
+         %HOBJPROD  Hessian of objective function times v.
+         Hv = self.ah.hessobj(x) * v;
+      end
+      
       function c = fcon_local(self, x)
          %FCON  Constraint functions, nonlinear followed by linear.
          c = self.ah.con(x);

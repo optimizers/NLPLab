@@ -57,7 +57,7 @@ classdef BcflashSolver < solvers.NlpSolver
             p.addParameter('backtracking', false);
             p.addParameter('maxIterLS', 10);
             p.addParameter('suffDec', 1e-4);
-            
+
             p.parse(varargin{:});
             
             self = self@solvers.NlpSolver(nlp, p.Unmatched);
