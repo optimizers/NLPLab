@@ -24,7 +24,7 @@ import utils.findProblems;
 [problems, notFound] = utils.findProblems(lookInto, problemsFile);
 
 %% Solve the problems
-solvers = {'Bcflash', 'OldBcflash', 'Tmp2'};
+solverNames = {'Bcflash', 'OldBcflash', 'Tmp2'};
 import solvers.BcflashSolver;
 import solvers.OldBcflashSolver;
 import solvers.Tmp2Solver;
@@ -39,13 +39,13 @@ solverOpts = struct('aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
 data = struct;
 data.infoHeader = {'pgNorm', 'fx', 'solveTime', 'iter', ...
     'iterCg', 'nObjFunc', 'nGrad', 'nHess'};
-data.solvers = solvers;
-data.Bcflash = struct;
-data.Old = struct;
-data.Tmp2 = struct;
+data.solverNames = solverNames;
+data.Bcflash = {};
+data.Old = {};
+data.Tmp2 = {};
 data.failed = {}; % Keep track of failures
 % Store performance profile data in a 3D matrix
-data.pMat = zeros(length(problems), length(solvers), 7);
+data.pMat = zeros(length(problems), length(solverNames), 7);
 
 nProb = 1;
 nSolv = 1;
@@ -53,14 +53,14 @@ for problem = problems
     % For each problem
     fprintf('\n\n--- %s ---\n\n', problem{1});
     [~, pname, ~] = fileparts(problem{1});
-    for tempSolver = solvers
+    for tempSolver = solverNames
         % For each solver
         try
             % Load the problem, sparse = true
             nlp = model.AmplModel(problem{1}, true);
             % Calling the solver
             solver = eval(['solvers.', tempSolver{1}, ...
-                '(nlp, solverOpts)']);
+                'Solver(nlp, solverOpts)']);
             solver.solve();
             
             % Updating the performance profile data matrix
@@ -69,12 +69,12 @@ for problem = problems
             data.pMat(nProb, nSolv, 1:7) = temp;
             
             % Storing other stuff
-            data.(tempSolver{1}).(pname).x = solver.x;
-            data.(tempSolver{1}).(pname).isSolved = solver.solved;
+            data.(tempSolver{1}){end + 1} = {solver.x, solver.solved};
         catch ME
             % Some problems return function evaluation failures
             warning('%s\n', ME.message);
             data.failed{end + 1} = problem{1};
+            keyboard;
         end
         nSolv = nSolv + 1;
     end
@@ -89,4 +89,4 @@ fclose(fid);
 import utils.perf;
 perfOpts = struct('display', true, 'saveFolder', './ampl-runs/', ...
     'prefix', pname, 'logPlot', true);
-utils.perf(data.pMat, {data.solvers, data.infoHeader}, perfOpts);
+utils.perf(data.pMat, {data.solverNames, data.infoHeader}, perfOpts);
