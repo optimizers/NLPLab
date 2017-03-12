@@ -1,6 +1,6 @@
 function perf(T, header, varargin)
 %% Performance profile
-% Based on the works of Dolan & Moré and the implementation of Sofi et al.
+% Based on the works of Dolan & Moré.
 % Inputs:
 %   - T: is a matrix of n_problems x n_solvers for a given performance
 %   metric.
@@ -41,9 +41,9 @@ markers = ['x', 'x', 'x', 'x', 'v', '^', 'o'];
 minperf = min(T, [], 2);
 
 % Evaluate the performance ratios
-R = T ./ repmat(minperf, 1, nSolv);
+R = real(T ./ repmat(minperf, 1, nSolv));
 
-if logplot
+if logPlot
     % Convert to log scale
     R = log2(R);
 end
@@ -70,9 +70,10 @@ for mm = 1 : nMetr
         hold on;
     end
     
-    axis([0.1, 1.1*maxRatio, 0, 1]);
-    ylabel(header{2}{mm})
-    legend(header{1}{:}, 'location', 'BestOutside');
+    axis([0.1, 0.5 * maxRatio(1, 1, mm), 0, 1]);
+    ylabel(header{2}{mm});
+    xlabel('\tau');
+    legend(header{1}{:}, 'location', 'best');
     
     if ~strcmp(saveFolder, '')
         % Print to eps
