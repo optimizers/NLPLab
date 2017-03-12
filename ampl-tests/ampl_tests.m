@@ -3,16 +3,14 @@ clc;
 clear all;
 close all;
 
-%% Init - edit accordingly
-ROOTDIR = '~/Masters';
-% Making sure NlpLab is on the path
-addpath(fullfile(ROOTDIR, 'nlplab'));
-% Making sure Spot is on the path
-addpath(fullfile(ROOTDIR, 'Spot'));
-% Making sure logging4matlab is on the path
-addpath(fullfile(ROOTDIR, 'logging4matlab'));
-% Make sure the ampl-interface is on the path
-addpath(ROOTDIR);
+%% Initializing the directories
+global ROOTDIR
+% Defining the root directory
+ROOTDIR = fullfile(getenv('HOME'), 'Masters');
+% setPaths is in recUtils
+addpath(fullfile(ROOTDIR, 'recUtils'));
+% Adding all the other repositories to the path
+setPaths; % edit this function accordingly
 
 %% Getting the problems
 % Folder that might contain the .nl problem files
@@ -24,35 +22,37 @@ import utils.findProblems;
 [problems, notFound] = utils.findProblems(lookInto, problemsFile);
 
 %% Solve the problems
-solverNames = {'Bcflash', 'OldBcflash', 'Tmp2'};
+solverNames = {'Bcflash', 'OldBcflash', 'Tmp2', 'Lbfgsb', 'Pnb'};
 import solvers.BcflashSolver;
 import solvers.OldBcflashSolver;
 import solvers.Tmp2Solver;
+import solvers.LbfgsbSolver;
+import solvers.PnbSolver;
 import model.AmplModel;
 
 % Set up the solvers' general parameters
-solverOpts = struct('aOptTol', 1e-10, 'aFeasTol', 1e-15, ...
-    'maxIter', 1e4, 'verbose', 2, 'useBb', false, 'backtracking', ...
-    false, 'maxRT', 10*60, 'maxEval', 1e4);
+solverOpts = struct('aOptTol', 1e-13, 'aFeasTol', eps, ...
+    'maxIter', 1e4, 'verbose', 1, 'maxRT', 10*60, 'maxEval', 1e4);
 
 % Save everything in 'data' struct
 data = struct;
-data.infoHeader = {'pgNorm', 'fx', 'solveTime', 'iter', ...
-    'iterCg', 'nObjFunc', 'nGrad', 'nHess'};
+data.infoHeader = {'pgNorm', 'solveTime', 'iter', 'nObjFunc', 'nGrad', ...
+    'nHess'};
 data.solverNames = solverNames;
 data.Bcflash = {};
-data.Old = {};
+data.OldBcflash = {};
 data.Tmp2 = {};
+data.Lbfgsb = {};
+data.Pnb = {};
 data.failed = {}; % Keep track of failures
 % Store performance profile data in a 3D matrix
-data.pMat = zeros(length(problems), length(solverNames), 7);
+data.pMat = nan(length(problems), length(solverNames), 6);
 
 nProb = 1;
-nSolv = 1;
 for problem = problems
     % For each problem
     fprintf('\n\n--- %s ---\n\n', problem{1});
-    [~, pname, ~] = fileparts(problem{1});
+    nSolv = 1;
     for tempSolver = solverNames
         % For each solver
         try
@@ -64,9 +64,9 @@ for problem = problems
             solver.solve();
             
             % Updating the performance profile data matrix
-            temp = [solver.pgNorm, solver.fx, solver.solveTime, ...
+            temp = [solver.pgNorm, solver.solveTime, ...
                 solver.iter, solver.nObjFunc, solver.nGrad, solver.nHess];
-            data.pMat(nProb, nSolv, 1:7) = temp;
+            data.pMat(nProb, nSolv, 1:6) = temp;
             
             % Storing other stuff
             data.(tempSolver{1}){end + 1} = {solver.x, solver.solved};
@@ -74,7 +74,6 @@ for problem = problems
             % Some problems return function evaluation failures
             warning('%s\n', ME.message);
             data.failed{end + 1} = problem{1};
-            keyboard;
         end
         nSolv = nSolv + 1;
     end
@@ -83,7 +82,6 @@ end
 
 [~, pname, ~] = fileparts(problemsFile);
 save([pname, '-run-data'], 'data');
-fclose(fid);
 
 %% Build the performance profiles
 import utils.perf;
