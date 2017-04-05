@@ -17,8 +17,6 @@ classdef ProjRecModel < model.RecModel
         projSolver;
         solved;
         normJac;
-        
-        innerIter;
     end
     
     
@@ -59,8 +57,6 @@ classdef ProjRecModel < model.RecModel
             self.projSolver = projSolver;
             % Getting projModel's normJac property
             self.normJac = self.projSolver.nlp.normJac;
-            
-            self.innerIter = 0;
         end
         
         function z = project(self, x)
@@ -84,23 +80,6 @@ classdef ProjRecModel < model.RecModel
             % Finding the primal variable from the dual variable
             z = self.projSolver.nlp.dualToPrimal(self.projSolver.x);
         end
-        
-        function w = eqProject(self, d, ind, tol, iterMax)
-            %% eqProject - Call eqProject from ProjModel
-            % Solves the problem
-            % min   1/2 || w - d||^2
-            %   w   sc (C*w)_i = 0, for i \not \in the working set
-            % Input:
-            %   - d: vector to project on (C*d)_i = 0
-            %   - ind: logical array of constraints that must be = 0
-            % Output:
-            %   - w: the projection of d
-            [w, innerIter] = self.projSolver.nlp.eqProject(d, ind, tol, ...
-                iterMax);
-            
-            self.innerIter = innerIter;
-        end
-        
     end
     
 end

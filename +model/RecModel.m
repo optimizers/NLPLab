@@ -26,7 +26,8 @@ classdef RecModel < model.NlpModel
         prec; % The preconditionner used, identity = none
         sino; % The sinogram of the problem
         geos; % The geometry that is used
-        cstrJacOp; % opSpot for the Jacobian (constant, linear constraint)
+        Jac; % opSpot for the Jacobian (constant, linear constraint)
+        JacJact; % opSpot for Jacobian times the transpose of the Jacobian
         objSize; % number of variables
     end
     
@@ -95,7 +96,7 @@ classdef RecModel < model.NlpModel
             cU = inf(objSiz, 1);
             cL = zeros(objSiz, 1);
             bL = -inf(objSiz, 1);
-            bU = inf(objSiz, 1);   
+            bU = inf(objSiz, 1);
             
             % Calling the NlpModel superclass (required for PDCOO & Cflash)
             self = self@model.NlpModel(name, x0, cL, cU, bL, bU);
@@ -114,12 +115,11 @@ classdef RecModel < model.NlpModel
             % Some functions require Spot operators because only the
             % matrix-product is available.
             
-            % Since the constraint is assumed to be linear, the jacobian is
-            % a constant. Multiplying the jacobian by a vector is
-            % equivalent to calling fcon_local(x) in this case.
-            jWrap = @(x, mode) self.fcon_local(x);
-            % Creating the operator
-            self.cstrJacOp = opFunction(self.objSize, self.objSize, jWrap);
+            % opSpot to Jacobian of constraints
+            self.Jac = opFunction(self.m, self.n, ...
+                @(z, mode) self.precMult(z, mode));
+            self.JacJact = opFunction(self.m, self.m, ...
+                @(z, mode) real(self.prec.AdjointDirect(z)));
         end
         
         % Override the default NlpModel methods
@@ -215,15 +215,13 @@ classdef RecModel < model.NlpModel
         function c = fcon_local(self, x)
             %% Computes the value of the constraints
             % In our case the constraint is Cx >= 0
-            x = real(x);
-            c = self.prec.Direct(x);
-            c = real(c);
+            c = real(self.prec.Direct(real(x)));
         end
         
         function J = gcon_local(self, ~)
             %% Computes the gradient of the constraints
             % In our case the constraint is Cx >= 0 so the jacobian is C
-            J = self.cstrJacOp;
+            J = self.Jac;
         end
         
         function Hc = hcon_local(self, ~, ~)
@@ -251,6 +249,22 @@ classdef RecModel < model.NlpModel
         function w = hconprod_local(self, ~, ~, ~)
             %% Computes the hessian of the constraints times vector
             w = sparse(self.objSize, 1);
+        end
+        
+    end
+    
+    
+    methods (Access = private)
+        
+        function z = precMult(self, z, mode)
+            %% Evaluates C * z
+            if mode == 1
+                z = self.prec.Direct(z);
+            elseif mode == 2
+                z = self.prec.Adjoint(z);
+            end
+            z = real(z);
+            self.ncalls_hvp = self.ncalls_hvp + 1;
         end
         
     end

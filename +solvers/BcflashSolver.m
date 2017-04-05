@@ -53,8 +53,8 @@ classdef BcflashSolver < solvers.NlpSolver
             p.addParameter('fMin', -1e32);
             p.addParameter('mu0', 0.01);
             p.addParameter('fid', 1);
-            p.addParameter('useBb', false);
-            p.addParameter('backtracking', false);
+            p.addParameter('useBb', true);
+            p.addParameter('backtracking', true);
             p.addParameter('maxIterLS', 10);
             p.addParameter('suffDec', 1e-4);
 

@@ -49,6 +49,11 @@ classdef CflashSolver < solvers.NlpSolver
         
         clock;
         maxExtraIter;
+        
+        eqProjFunc;
+        Jac;
+        JacJact;
+        krylOpts;
     end
     
     properties (Hidden = true, Constant)
@@ -88,8 +93,6 @@ classdef CflashSolver < solvers.NlpSolver
             % Verifying if the model has the required methods & props
             if ~ismethod(nlp, 'project')
                 error('No project method in nlp');
-            elseif ~ismethod(nlp, 'eqProject')
-                error('No eqProject method in nlp');
             elseif ~isprop(nlp, 'normJac')  && ~ismethod(nlp, 'normJac')
                 error('No normJac attribute in nlp');
             end
@@ -110,6 +113,7 @@ classdef CflashSolver < solvers.NlpSolver
             p.addParameter('maxIterLS', 10);
             p.addParameter('suffDec', 1e-4);
             p.addParameter('maxExtraIter', 5);
+            p.addParameter('method', 'pcg');
             
             p.parse(varargin{:});
             
@@ -135,14 +139,47 @@ classdef CflashSolver < solvers.NlpSolver
             
             import utils.PrintInfo;
             
+            % Setting the projection on equality constraints function
+            if isa(self.nlp.gcon([]), 'opSpot')
+                % If the Jacobian is already an opSpot, keep it
+                self.Jac = self.nlp.gcon([]);
+                % Probe the NLP model for JacJact property
+                if isprop(self.nlp, 'JacJact')
+                    % There is a more efficient way to compute J*J'
+                    self.JacJact = self.nlp.JacJact;
+                else
+                    % Simply create J*J'
+                    self.JacJact = opFoG(self.Jac, self.Jac');
+                end
+                
+                if strcmp(p.Results.method, 'lsqr')
+                    import krylov.lsqr_spot;
+                    self.eqProjFunc = @(d, ind) self.callLsqr(d, ind);
+                elseif strcmp(p.Results.method, 'lsmr')
+                    import krylov.lsmr_spot;
+                    self.eqProjFunc = @(d, ind) self.callLsmr(d, ind);
+                elseif strcmp(p.Results.method, 'minres')
+                    % MinRes
+                    import krylov.minres_spot;
+                    self.eqProjFunc = @(d, ind) self.callMinres(d, ind);
+                else
+                    % Default to PCG
+                    self.eqProjFunc = @(d, ind) self.callPcg(d, ind);
+                end
+            else
+                % Matrix is in double format, so we invert it using \
+                self.Jac = self.nlp.gcon([]);
+                self.eqProjFunc = @(d, ind) self.doMatInv(d, ind);
+            end
+            
             self.stats.proj = struct;
             self.stats.proj.info = [0, 0];
             self.stats.proj.infoHeader = {'avg pgNorm', 'avg solveTime'};
-%             self.stats.proj.info = [0, 0, 0, 0, 0, 0, 0];
-%             self.stats.proj.infoHeader = ...
-%                 {'nProj', 'iter', 'nObjFunc', 'nGrad', 'nHess', ...
-%                 'pgNorm', 'solveTime'};
-%             self.stats.proj.exit = {};
+            %             self.stats.proj.info = [0, 0, 0, 0, 0, 0, 0];
+            %             self.stats.proj.infoHeader = ...
+            %                 {'nProj', 'iter', 'nObjFunc', 'nGrad', 'nHess', ...
+            %                 'pgNorm', 'solveTime'};
+            %             self.stats.proj.exit = {};
             
             self.stats.rec = struct;
             self.stats.rec.info = [];
@@ -196,6 +233,13 @@ classdef CflashSolver < solvers.NlpSolver
             self.gNorm0 = gNorm;
             self.rOptTol = self.aOptTol * gNorm;
             self.rFeasTol = self.aFeasTol * abs(f);
+            
+            % Update Krylov options for eqProject linear solvers
+            self.krylOpts.etol = self.aOptTol + self.rOptTol;
+            self.krylOpts.rtol = self.aOptTol + self.rOptTol;
+            self.krylOpts.atol = self.aOptTol + self.rOptTol;
+            self.krylOpts.btol = self.aOptTol + self.rOptTol;
+            self.krylOpts.itnlim = self.nlp.n;
             
             % Actual and predicted reductions. Initial inf value prevents
             % exits based on related on first iter.
@@ -402,12 +446,6 @@ classdef CflashSolver < solvers.NlpSolver
                     max(alphMin, (s' * s) / betaBB));
             end
         end % bbsteplength
-        
-        function xProj = eqProject(self, x, ind, tol, iterMax)
-            %% EqProject - simple wrapper to increment nProj counter
-            xProj = self.nlp.eqProject(x, ind, tol, iterMax);
-            self.nProj = self.nProj + 1;
-        end
         
         function delta = updateDelta(self, f, fc, g, s, actRed, preRed, ...
                 delta)
@@ -685,7 +723,7 @@ classdef CflashSolver < solvers.NlpSolver
             % the constraint set. Project the point
             % x = self.nlp.project(x + s);
             % if there are risks of rounding errors.
-            x = x + s; 
+            x = x + s;
             
             % Start the main iter loop.
             % There are at most n iterations because at each iter
@@ -841,8 +879,7 @@ classdef CflashSolver < solvers.NlpSolver
                 if chk
                     % Project {p : (C*p)_i = 0} for i such as (C*x)_i = 0
                     t = tic;
-                    p = self.eqProject(p, ~indFree, ...
-                        self.aOptTol + self.rOptTol, self.nlp.n);
+                    p = self.eqProjFunc(p, ~indFree);
                     self.clock.spcg.trpcg.eqproj = self.clock.spcg.trpcg.eqproj + toc(t);
                 end
                 
@@ -945,6 +982,102 @@ classdef CflashSolver < solvers.NlpSolver
             brptMin = min([brptInc; brptDec; inf]);
             brptMax = max([brptInc; brptDec; -inf]);
         end % breakpt
+        
+        function wProj = callPcg(self, d, fixed)
+            %% CallPcg
+            % Solves the problem
+            % min   1/2 || w - d||^2
+            %   w   sc (C*w)_i = 0, for i \not \in the working set
+            % where C is the jacobian of the linear constraints and i
+            % denotes the indices of the fixed variables. This problem has
+            % an analytical solution.
+            %
+            % From the first order KKT conditions, we can obtain the
+            % following set of equations:
+            %
+            %   w               = d + B*C*z
+            %   (B*C*C'*B') * z = -B*C*d
+            %
+            % where z is the lagrange mutliplier associated with the
+            % equality constraint.
+            %
+            % Inputs:
+            %   - d: vector to project on the equality constraint set
+            %   - fixed: indices not in the working set
+            % Ouput:
+            %   - wProj: projected direction
+            
+            subC = self.Jac(fixed, :); % B * C
+            subCCt = self.JacJact(fixed, fixed);
+            
+            [z, ~, ~] = pcg(subCCt, subC*(-d), ...
+                self.aOptTol + self.rOptTol, self.nlp.n);
+            wProj = d + (subC' * z);
+            
+            self.nProj = self.nProj + 1;
+        end
+        
+        function wProj = callMinres(self, d, fixed)
+            %% CallMinres
+            % Solves the problem
+            % min   1/2 || w - d||^2
+            %   w   sc (C*w)_i = 0, for i \not \in the working set
+            % See callPcg's documentation
+            
+            subC = self.Jac(fixed, :); % B * C
+            subCCt = self.JacJact(fixed, fixed);
+            
+            z = krylov.minres_spot(subCCt, subC*(-d), self.krylOpts);
+            wProj = d + (subC' * z);
+            
+            self.nProj = self.nProj + 1;
+        end
+        
+        function wProj = callLsqr(self, d, fixed)
+            %% CallLsqr
+            % Solves the problem
+            % min   1/2 || w - d||^2
+            %   w   sc (C*w)_i = 0, for i \not \in the working set
+            % See callPcg's documentation
+            
+            subC = self.Jac(fixed, :); % B * C
+            
+            z = krylov.lsqr_spot(subC', -d, self.krylOpts);
+            wProj = d + (subC' * z);
+            
+            self.nProj = self.nProj + 1;
+        end
+        
+        function wProj = callLsmr(self, d, fixed)
+            %% CallLsmr
+            % Solves the problem
+            % min   1/2 || w - d||^2
+            %   w   sc (C*w)_i = 0, for i \not \in the working set
+            % See callPcg's documentation
+            
+            subC = self.Jac(fixed, :); % B * C
+            
+            z = krylov.lsmr_spot(subC', -d, self.krylOpts);
+            wProj = d + (subC' * z);
+            
+            self.nProj = self.nProj + 1;
+        end
+        
+        function wProj = doMatInv(self, d, fixed)
+            %% DoMatInv
+            % Solves the problem
+            % min   1/2 || w - d||^2
+            %   w   sc (C*w)_i = 0, for i \not \in the working set
+            % Matrix Inversion of B*C*C'*B'
+            
+            subC = self.Jac(fixed, :); % B * C
+            
+            z = (subC * subC') \ (subC * -d);
+            wProj = d + (subC' * z);
+            
+            self.nProj = self.nProj + 1;
+        end
+        
         
     end % private methods
     
