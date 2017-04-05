@@ -66,13 +66,13 @@ classdef ProjModel < model.LeastSquaresModel
             % it must be set prior to the call to solve() using
             % setPointToProject.
             % !!
-            b = [];
+            b = sparse(objSiz, 1, 0);
             
             % A will depend on current object's function precMult, passing
             % a temporary value to the constructor
             empt = sparse(objSiz, objSiz, 0);
             
-            self = self@model.LeastSquaresModel(empt, b, empt, [], [], ...
+            self = self@model.LeastSquaresModel(empt, b, empt, -bU, bU, ...
                 bL, bU, z0);
             
             % Initializing input parameters
@@ -80,9 +80,9 @@ classdef ProjModel < model.LeastSquaresModel
             self.prec = prec;
             
             % Updating A once the object exists
-            self.A = opFunction(objSiz, objSiz, ...
+            self.A = opFunction(self.m, self.n, ...
                 @(z, mode) self.precMult(z, mode));
-            self.AAt = opFunction(objSiz, objSiz, ...
+            self.AAt = opFunction(self.m, self.m, ...
                 @(z, mode) self.hobjprod([], [], z));
             % Getting the norm of the preconditionner, helps to evaluate
             % "relative" decreases/zeros.
@@ -125,46 +125,6 @@ classdef ProjModel < model.LeastSquaresModel
             H = real(self.prec.AdjointDirect(v));
         end
         
-        
-        %% This method doesn't correspond to the same problem
-        % Solves the projection { x | C*x = 0 } for the primal variable
-        function [wProj, innerIter] = eqProject(self, d, fixed, tol, ...
-                iterMax)
-            %% EqProject - project vector d on equality constraints
-            % Solves the problem
-            % min   1/2 || w - d||^2
-            %   w   sc (C*w)_i = 0, for i \not \in the working set
-            % where C is the jacobian of the linear constraints and i
-            % denotes the indices of the fixed variables. This problem has
-            % an analytical solution.
-            %
-            % From the first order KKT conditions, we can obtain the
-            % following set of equations:
-            %
-            %   w               = d + B*C*z
-            %   (B*A*A'*B') * z = -B*C*d
-            %
-            % where z is the lagrange mutliplier associated with the
-            % equality constraint.
-            %
-            % Inputs:
-            %   - d: vector to project on the equality constraint set
-            %   - fixed: indices not in the working set
-            % Ouput:
-            %   - v: projected direction
-            
-            % !!! NOTE: for LeastSquaresModel, our C is A !!!
-            % If B is the mask matrix such that
-            % B := {b_i' = ith col of I for all i \in ~working}
-            % Building reduced operators from object's attributes
-            subA = self.A(fixed, :); % B * C
-            subAAt = self.AAt(fixed, fixed);
-            % Using CG to solve (B*C*C'*B') z = -B*C*d
-            [z, ~, ~, innerIter] = pcg(subAAt', subA*(-d), tol, iterMax);
-            % For the unconstrained case, the solution is trivial
-            wProj = d + (subA' * z);
-        end
-        
         function z = hessPrecBCCB(self, ind, v)
             %% HessPrecProd
             % This function returns the product of
@@ -176,7 +136,7 @@ classdef ProjModel < model.LeastSquaresModel
             %   - v: arbitrary vector that is already of reduced size
             % Output:
             %   - z: product of preconditionner times v
-
+            
             % Converting logical to positions
             ind = find(ind);
             
@@ -185,7 +145,7 @@ classdef ProjModel < model.LeastSquaresModel
             [r, c] = ind2sub([self.prec.BlkSiz, self.prec.Nblks], ind);
             
             % Since C * C' is block-circulant, in the worst case, we need
-            % to form one full block to obtain the complete diagonal of 
+            % to form one full block to obtain the complete diagonal of
             % C * C'. Therefore, we can remove duplicates.
             [r, ~, iR] = unique(r);
             nR = length(r);
@@ -198,7 +158,7 @@ classdef ProjModel < model.LeastSquaresModel
                 p(c(ii)) = 1;
                 
                 % (B * F' * D² * F * B)_ith row of block form
-                temp = ifft( ... 
+                temp = ifft( ...
                     self.prec.Mdiag(r(ii) : self.prec.BlkSiz : end).^2 ...
                     .* fft(p, [], 2), [], 2);
                 
@@ -220,7 +180,6 @@ classdef ProjModel < model.LeastSquaresModel
     end
     
     
-    %% Private methods
     methods (Access = private)
         
         function z = precMult(self, z, mode)

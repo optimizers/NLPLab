@@ -19,23 +19,16 @@ classdef Tmp2Solver < solvers.NlpSolver
     % computed. It can either be:
     %
     %   * 'minres': the true hessian of the objective function is used and
-    %   must be an ouput argument of nlp's obj function. It must also be a
+    %   must be an output argument of nlp's obj function. It must also be a
     %   Spot operator and has to be symmetric as MinRes will be used.
     %
     %   * 'lsqr': the true hessian of the objective function is used and
-    %   must be an ouput argument of nlp's obj function. It must also be a
+    %   must be an output argument of nlp's obj function. It must also be a
     %   Spot operator and has to be symmetric as LSQR will be used.
     %
-    %   * 'newton': the true hessian of the objective function is used an
-    %   must be an ouput argument of nlp's obj function. It has to be an
-    %   explicit matrix.
-    %
-    %   * 'lbfgs': the BFGS approximation of the hessian is used, but with
-    %   limited memory.
-    %
-    %   * 'bfgs': the BFGS approximation of the hessian is used.
-    %
-    %   * 'sd': the direction is simply the steepest descent.
+    %   * 'lsmr': the true hessian of the objective function is used and
+    %   must be an output argument of nlp's obj function. It must also be a
+    %   Spot operator and has to be symmetric as LSMR will be used.
     %
     %   * 'pcg': call MATLAB's pcg() on Hx = -g, where H must be positive
     %   definite.
@@ -333,11 +326,8 @@ classdef Tmp2Solver < solvers.NlpSolver
             % on the free variables.
             
             % Different methods could be used. Using PCG for now.
-            [d, ~, ~, ~, resvec] = pcg(H(working, working), -g(working), ...
+            [d, ~, ~] = pcg(H(working, working), -g(working), ...
                 self.aOptTol + self.rOptTol, self.nlp.n);
-            
-            self.saveD{self.iter} = d;
-            self.saveRnorm{self.iter} = resvec;
         end
         
         function d = callMinres(self, g, H, working)
@@ -346,11 +336,8 @@ classdef Tmp2Solver < solvers.NlpSolver
             % hessian provided as input arguments, assuming they are of
             % reduced size. This descent direction should only be computed
             % on the free variables.
-            [d, ~, stats] = krylov.minres_spot(H(working, working), -g(working), ...
+            d = krylov.minres_spot(H(working, working), -g(working), ...
                 self.krylOpts);
-            
-            self.saveD{self.iter} = d;
-            self.saveRnorm{self.iter} = stats.resvec;
         end
         
         function d = callLsqr(self, x, working)
@@ -361,11 +348,8 @@ classdef Tmp2Solver < solvers.NlpSolver
             % the objective function ||A*x - b||^2.
             
             temp = -self.nlp.getResidual(x);
-            [d, ~, stats] = krylov.lsqr_spot(self.nlp.A(:, working), temp, ...
+            d = krylov.lsqr_spot(self.nlp.A(:, working), temp, ...
                 self.krylOpts);
-            
-            self.saveD{self.iter} = d;
-            self.saveRnorm{self.iter} = stats.resvec;
         end
         
         function d = callLsmr(self, x, working)
@@ -376,11 +360,8 @@ classdef Tmp2Solver < solvers.NlpSolver
             % the objective function ||A*x - b||^2.
             
             temp = -self.nlp.getResidual(x);
-            [d, ~, stats] = krylov.lsmr_spot(self.nlp.A(:, working), temp, ...
+            d = krylov.lsmr_spot(self.nlp.A(:, working), temp, ...
                 self.krylOpts);
-            
-            self.saveD{self.iter} = d;
-            self.saveRnorm{self.iter} = stats.resvec;
         end
         
         function [x, f, failed, t] = projectThenArmijo(self, x, f, g, d)
