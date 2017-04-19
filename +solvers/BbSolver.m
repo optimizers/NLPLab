@@ -17,7 +17,6 @@ classdef BbSolver < solvers.NlpSolver
         storedAlph;
         tau;
         
-        stats;
     end % private properties
     
     properties (Hidden = true, Constant)
@@ -104,22 +103,6 @@ classdef BbSolver < solvers.NlpSolver
                     self.bbFunc = @(xOld, x, gOld, g) ...
                         self.bbStep(xOld, x, gOld, g);
             end
-            
-            self.stats.proj = struct;
-            self.stats.proj.info = [0, 0];
-            self.stats.proj.infoHeader = {'avg pgNorm', 'avg solveTime'};
-            %             self.stats.proj.info = [0, 0, 0, 0, 0, 0, 0];
-            %             self.stats.proj.infoHeader = ...
-            %                 {'nProj', 'iter', 'nObjFunc', 'nGrad', 'nHess', ...
-            %                 'pgNorm', 'solveTime'};
-            %             self.stats.proj.exit = {};
-            
-            self.stats.rec = struct;
-            self.stats.rec.info = [];
-            self.stats.rec.infoHeader = ...
-                {'iter', 'nObjFunc', 'nGrad', 'nHess', 'nProj', ...
-                'innerIter', 'pgNorm', 'solveTime'};
-            self.stats.rec.exit = {};
         end % constructor
         
         function self = solve(self)
@@ -167,24 +150,18 @@ classdef BbSolver < solvers.NlpSolver
                 
                 self.nObjFunc = self.nlp.ncalls_fobj + ...
                     self.nlp.ncalls_fcon;
-                self.nGrad = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
-                self.nHess = self.nlp.ncalls_hvp + self.nlp.ncalls_hes;
-                
+
                 if self.verbose >= 2
                     self.printf(self.LOG_BODY, self.iter, ...
-                        self.nObjFunc, self.nProj, alph, f, pgnrm);
+                        self.nObjFunc, self.nProj, t, f, pgnrm);
                 end
                 
-                self.stats.rec.info = [self.stats.rec.info; ...
-                    [self.iter, self.nObjFunc, self.nGrad, self.nHess, ...
-                    self.nProj, 0, pgnrm, toc(self.solveTime)]];
-                
                 % Checking stopping conditions
-                if pgnrm < self.rOptTol + self.aOptTol
+                if pgnrm <= self.rOptTol + self.aOptTol
                     self.iStop = self.EXIT_OPT_TOL;
-                elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
+                elseif abs(f - fOld) <= self.rFeasTol + self.aFeasTol
                     self.iStop = self.EXIT_FEAS_TOL;
-                elseif self.nObjFunc > self.maxEval
+                elseif self.nObjFunc >= self.maxEval
                     self.iStop = self.EXIT_MAX_EVAL;
                 elseif self.iter >= self.maxIter
                     self.iStop = self.EXIT_MAX_ITER;
@@ -245,9 +222,7 @@ classdef BbSolver < solvers.NlpSolver
             self.isSolved();
             
             printObj.footer(self);
-            
-            self.stats.rec.exit{end + 1} = self.EXIT_MSG{self.iStop};
-        end % solve
+            end % solve
         
         function printf(self, varargin)
             %% Printf - prints variables arguments to a file
@@ -266,25 +241,6 @@ classdef BbSolver < solvers.NlpSolver
                 % Propagate throughout the program to exit
                 self.iStop = self.EXIT_PROJ_FAILURE;
             end
-            
-            % This can be removed later
-            if isprop(self.nlp, 'projSolver')
-                solver = self.nlp.projSolver;
-                % Cumulative average of ||Pg|| and solve time
-                self.stats.proj.info = (self.nProj*self.stats.proj.info ...
-                    + [solver.pgNorm, solver.solveTime])/(self.nProj + 1);
-                %                 temp = [self.nProj, solver.iter, solver.nObjFunc, ...
-                %                     solver.nGrad, solver.nHess, solver.pgNorm, ...
-                %                     solver.solveTime];
-                %                 temp(2 : end - 2) = temp(2 : end - 2) + ...
-                %                     self.stats.proj.info(end, 2 : end - 2);
-                %                 temp(end) = temp(end) + self.stats.proj.info(end, end);
-                %                 % Collecting statistics
-                %                 self.stats.proj.info = [self.stats.proj.info; temp];
-                %                 self.stats.proj.exit{end + 1} = ...
-                %                     solver.EXIT_MSG{solver.iStop};
-            end
-            
             self.nProj = self.nProj + 1;
         end
         

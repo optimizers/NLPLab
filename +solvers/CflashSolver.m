@@ -38,8 +38,6 @@ classdef CflashSolver < solvers.NlpSolver
         fMin;
         fid; % File ID of where to direct log output
         
-        stats;
-        
         % Initialize cauchy with Barzilai-Borwein step length
         useBb;
         % Backtracking parameters
@@ -47,13 +45,13 @@ classdef CflashSolver < solvers.NlpSolver
         suffDec;
         maxIterLS;
         
-        clock;
         maxExtraIter;
         
         eqProjFunc;
         Jac;
         JacJact;
         krylOpts;
+        method;
     end
     
     properties (Hidden = true, Constant)
@@ -106,9 +104,9 @@ classdef CflashSolver < solvers.NlpSolver
             p.addParameter('fMin', -1e32);
             p.addParameter('mu0', 0.01);
             p.addParameter('fid', 1);
-            p.addParameter('eqTol', 1e-6);
             p.addParameter('maxProj', 1e5);
             p.addParameter('useBb', false);
+            p.addParameter('eqTol', eps);
             p.addParameter('backtracking', false);
             p.addParameter('maxIterLS', 10);
             p.addParameter('suffDec', 1e-4);
@@ -138,6 +136,14 @@ classdef CflashSolver < solvers.NlpSolver
             end
             
             import utils.PrintInfo;
+            
+            self.method = p.Results.method;
+            % Update Krylov options for eqProject linear solvers
+            self.krylOpts.etol = self.eqTol;
+            self.krylOpts.rtol = self.eqTol;
+            self.krylOpts.atol = self.eqTol;
+            self.krylOpts.btol = self.eqTol;
+            self.krylOpts.itnlim = self.nlp.n;
             
             % Setting the projection on equality constraints function
             if isa(self.nlp.gcon([]), 'opSpot')
@@ -172,35 +178,10 @@ classdef CflashSolver < solvers.NlpSolver
                 self.eqProjFunc = @(d, ind) self.doMatInv(d, ind);
             end
             
-            self.stats.proj = struct;
-            self.stats.proj.info = [0, 0];
-            self.stats.proj.infoHeader = {'avg pgNorm', 'avg solveTime'};
-            %             self.stats.proj.info = [0, 0, 0, 0, 0, 0, 0];
-            %             self.stats.proj.infoHeader = ...
-            %                 {'nProj', 'iter', 'nObjFunc', 'nGrad', 'nHess', ...
-            %                 'pgNorm', 'solveTime'};
-            %             self.stats.proj.exit = {};
-            
-            self.stats.rec = struct;
-            self.stats.rec.info = [];
-            self.stats.rec.infoHeader = ...
-                {'iter', 'nObjFunc', 'nGrad', 'nHess', 'nProj', ...
-                'innerIter', 'pgNorm', 'solveTime'};
-            self.stats.rec.exit = {};
         end % constructor
         
         function self = solve(self)
             %% Solve
-            
-            self.clock = struct;
-            self.clock.cauchy.all = 0;
-            self.clock.cauchy.interp = 0;
-            self.clock.cauchy.extrap = 0;
-            self.clock.spcg.all = 0;
-            self.clock.spcg.prsrch.all = 0;
-            self.clock.spcg.prsrch.interp = 0;
-            self.clock.spcg.trpcg.all = 0;
-            self.clock.spcg.trpcg.eqproj = 0;
             
             self.solveTime = tic;
             self.iter = 1;
@@ -211,15 +192,6 @@ classdef CflashSolver < solvers.NlpSolver
             self.nlp.resetCounters();
             
             printObj = utils.PrintInfo('Cflash');
-            
-            if self.verbose >= 2
-                extra = containers.Map( ...
-                    {'fMin', 'cgTol', 'mu0', 'maxProj', 'eqTol'}, ...
-                    {self.fMin, self.cgTol, self.mu0, self.maxProj, ...
-                    self.eqTol});
-                printObj.header(self, extra);
-                self.printf(self.LOG_HEADER_FORMAT, self.LOG_HEADER{:});
-            end
             
             % Make sure initial point is feasible
             x = self.project(self.nlp.x0);
@@ -234,12 +206,14 @@ classdef CflashSolver < solvers.NlpSolver
             self.rOptTol = self.aOptTol * gNorm;
             self.rFeasTol = self.aFeasTol * abs(f);
             
-            % Update Krylov options for eqProject linear solvers
-            self.krylOpts.etol = self.aOptTol + self.rOptTol;
-            self.krylOpts.rtol = self.aOptTol + self.rOptTol;
-            self.krylOpts.atol = self.aOptTol + self.rOptTol;
-            self.krylOpts.btol = self.aOptTol + self.rOptTol;
-            self.krylOpts.itnlim = self.nlp.n;
+            if self.verbose >= 2
+                extra = containers.Map( ...
+                    {'fMin', 'cgTol', 'mu0', 'maxProj', 'eqTol', ...
+                    'method'}, {self.fMin, self.cgTol, self.mu0, ...
+                    self.maxProj, self.eqTol, self.method});
+                printObj.header(self, extra);
+                self.printf(self.LOG_HEADER_FORMAT, self.LOG_HEADER{:});
+            end
             
             % Actual and predicted reductions. Initial inf value prevents
             % exits based on related on first iter.
@@ -265,6 +239,9 @@ classdef CflashSolver < solvers.NlpSolver
                     self.iStop = self.EXIT_FEAS_TOL;
                 elseif self.iter >= self.maxIter
                     self.iStop = self.EXIT_MAX_ITER;
+                elseif self.nlp.ncalls_fobj + self.nlp.ncalls_fcon >= ...
+                        self.maxEval
+                    self.iStop = self.EXIT_MAX_EVAL;
                 elseif self.nProj >= self.maxProj
                     self.iStop = self.EXIT_MAX_PROJ;
                 elseif toc(self.solveTime) >= self.maxRT
@@ -277,15 +254,6 @@ classdef CflashSolver < solvers.NlpSolver
                         pgNorm, self.nProj, self.iterCg, preRed, delta, ...
                         status, nFree);
                 end
-                
-                self.nObjFunc = self.nlp.ncalls_fobj + ...
-                    self.nlp.ncalls_fcon;
-                self.nGrad = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
-                self.nHess = self.nlp.ncalls_hvp + self.nlp.ncalls_hes;
-                
-                self.stats.rec.info = [self.stats.rec.info; ...
-                    [self.iter, self.nObjFunc, self.nGrad, self.nHess, ...
-                    self.nProj, self.iterCg, pgNorm, toc(self.solveTime)]];
                 
                 % Act on exit conditions
                 if self.iStop
@@ -302,14 +270,10 @@ classdef CflashSolver < solvers.NlpSolver
                 H = self.nlp.hobj(x);
                 
                 % Cauchy step
-                t = tic;
                 [alphc, s] = self.cauchy(H, x, g, delta, alphc);
-                self.clock.cauchy.all = self.clock.cauchy.all + toc(t);
                 
                 % Projected Newton step
-                t = tic;
                 [x, s, ~] = self.spcg(H, x, g, delta, s);
-                self.clock.spcg.all = self.clock.spcg.all + toc(t);
                 
                 % Compute the objective at this new point
                 f = self.nlp.fobj(x);
@@ -372,9 +336,6 @@ classdef CflashSolver < solvers.NlpSolver
             self.isSolved();
             
             printObj.footer(self);
-            
-            self.stats.rec.exit{end + 1} = self.EXIT_MSG{self.iStop};
-            self.stats.clock = self.clock;
         end % solve
         
         function xProj = project(self, x)
@@ -384,32 +345,7 @@ classdef CflashSolver < solvers.NlpSolver
                 % Propagate throughout the program to exit
                 self.iStop = self.EXIT_PROJ_FAILURE;
             end
-            % This can be removed later
-            if isprop(self.nlp, 'projSolver')
-                solver = self.nlp.projSolver;
-                % Cumulative average of ||Pg|| and solve time
-                self.stats.proj.info = (self.nProj*self.stats.proj.info ...
-                    + [solver.pgNorm, solver.solveTime])/(self.nProj + 1);
-            end
-            
             self.nProj = self.nProj + 1;
-            
-            %             self.nProj = self.nProj + 1;
-            %
-            %             % This can be removed later
-            %             if isprop(self.nlp, 'projSolver')
-            %                 solver = self.nlp.projSolver;
-            %                 temp = [self.nProj, solver.iter, solver.nObjFunc, ...
-            %                     solver.nGrad, solver.nHess, solver.pgNorm, ...
-            %                     solver.solveTime];
-            %                 temp(2 : end - 2) = temp(2 : end - 2) + ...
-            %                     self.stats.proj.info(end, 2 : end - 2);
-            %                 temp(end) = temp(end) + self.stats.proj.info(end, end);
-            %                 % Collecting statistics
-            %                 self.stats.proj.info = [self.stats.proj.info; temp];
-            %                 self.stats.proj.exit{end + 1} = ...
-            %                     solver.EXIT_MSG{solver.iStop};
-            %             end
         end
         
     end % public methods
@@ -525,7 +461,6 @@ classdef CflashSolver < solvers.NlpSolver
             
             % Either interpolate or extrapolate to find a successful step.
             if interp
-                t = tic;
                 self.logger.debug('Interpolating');
                 % Reduce alph until a successful step is found.
                 while (toc(self.solveTime) < self.maxRT) && ~self.iStop
@@ -542,9 +477,7 @@ classdef CflashSolver < solvers.NlpSolver
                         end
                     end
                 end
-                self.clock.cauchy.interp = self.clock.cauchy.interp + toc(t);
             else % Extrapolate
-                t = tic;
                 self.logger.debug('Extrapolating');
                 % Increase alph until a successful step is found.
                 alphas = alph;
@@ -568,13 +501,11 @@ classdef CflashSolver < solvers.NlpSolver
                     else
                         break
                     end
-                    extrapf = extrapf^2;
                     iter = iter + 1;
                 end
                 % Recover the last successful step.
                 alph = alphas;
                 s = self.gpstep(x, -alph, g);
-                self.clock.cauchy.extrap = self.clock.cauchy.extrap + toc(t);
             end
             self.logger.debug(sprintf('Leaving Cauchy, α = %7.1e', alph));
         end % cauchy
@@ -628,7 +559,6 @@ classdef CflashSolver < solvers.NlpSolver
             % Reduce alph until the sufficient decrease condition is
             % satisfied or x + alph*w is feasible.
             self.logger.debug('Interpolating');
-            t = tic;
             iter = 1;
             while (alph > brptMin) && ...
                     (toc(self.solveTime) < self.maxRT) && ~self.iStop ...
@@ -645,10 +575,8 @@ classdef CflashSolver < solvers.NlpSolver
                 % This is a crude interpolation procedure that
                 % will be replaced in future versions of the code.
                 alph = interpf * alph;
-                interpf = interpf^2;
                 iter = iter + 1;
             end
-            self.clock.spcg.prsrch.interp = self.clock.spcg.prsrch.interp + toc(t);
             % Force at least one more constraint to be added to the active
             % set if alph < brptMin and the full step is not successful.
             % There is sufficient decrease because the quadratic function
@@ -715,48 +643,45 @@ classdef CflashSolver < solvers.NlpSolver
             %      info = 3  Failure to converge within iterMax iterations.
             
             self.logger.debug('-- Entering SPCG --');
-            % Compute H*(x[1] - x[0]) and store in w.
-            Hs = H * s;
-            % Norm of obj. func. gradient is a stopping criteria
-            gNorm = norm(g);
             % Compute the Cauchy point. This point should already respect
-            % the constraint set. Project the point
-            % x = self.nlp.project(x + s);
-            % if there are risks of rounding errors.
+            % the constraint set.
             x = x + s;
-            
-            % Start the main iter loop.
-            % There are at most n iterations because at each iter
-            % at least one variable becomes active.
+            % Evaluate H * (x_{k, j} - x_k)
+            Hs = H * s;
+
+            % There are at most n iterations because at each iter at least 
+            % one variable becomes active.
             iters = 1;
             for nFaces = 1 : self.nlp.n
                 
                 % Determine the free variables at the current minimizer.
-                indFree = self.getIndFree(x);
+                fixed = ~self.getIndFree(x);
                 
                 % Exit if there are no free constraints
-                if ~any(indFree)
+                if ~any(~fixed)
                     info = 1;
                     break;
                 end
                 
-                % Compute the grad of quad q(x[k]) = g + H*(x[k] - x[0]),
-                gQuad = Hs + g;
+                % Hs & g must be such that (Cp)_i = 0 \forall i \in fixed
+                Hs = self.eqProjFunc(Hs, fixed);
+                gP = self.eqProjFunc(g, fixed);
+                % Compute the grad of quad q = g + H*(x{k, j} - x_k)
+                gQuad = Hs + gP;
+                
+                % Norm of obj. func. gradient is a stopping criteria
+                gNorm = norm(gP);
                 
                 % Solve the trust region subproblem in the free variables
                 % to generate a direction p[k]. Store p[k] in the array w.
                 tol = self.cgTol * gNorm;
-                t = tic;
-                [w, iterTR, infotr] = self.trpcg(H, gQuad, delta, ...
-                    tol, self.maxIterCg, indFree, s);
-                self.clock.spcg.trpcg.all = self.clock.spcg.trpcg.all + toc(t);
+                [w, iterTR, infoTR] = self.trpcg(H, gQuad, delta, ...
+                    tol, self.maxIterCg, fixed, s);
                 iters = iters + iterTR;
                 
                 % Use a projected search to obtain the next iterate.
                 % The projected search algorithm stores s[k] in w.
-                t = tic;
                 w = self.prsrch(H, x, gQuad, w);
-                self.clock.spcg.prsrch.all = self.clock.spcg.prsrch.all + toc(t);
                 
                 % Update the minimizer and the step.
                 % Note that s now contains x[k+1] - x[0].
@@ -765,17 +690,18 @@ classdef CflashSolver < solvers.NlpSolver
                 
                 % Compute H*(x[k+1] - x[0]) and store in w.
                 Hs = H * s;
+                HsP = self.eqProjFunc(Hs, fixed);
                 
                 % Convergence and termination test.
                 % We terminate if the preconditioned conjugate gradient
                 % method encounters a direction of negative curvature, or
                 % if the step is at the trust region bound.
-                if norm(Hs + g) <= self.cgTol * gNorm
+                if norm(HsP + gP) <= tol
                     info = 1;
                     self.logger.debug(sprintf( ...
                         ['Leaving SPCG, info = %d', ' (conv)'], info));
                     break;
-                elseif infotr == 2 || infotr == 3
+                elseif infoTR == 2 || infoTR == 3
                     info = 2;
                     self.logger.debug(sprintf( ...
                         ['Leaving SPCG, info = %d', ' (TR)'], info));
@@ -805,7 +731,7 @@ classdef CflashSolver < solvers.NlpSolver
             % where C is the jacobian of the linear constraints
             Cx = self.nlp.fcon(x); % C*x
             % Represents "relative" zero value, smallest approx is eps
-            appZero = max(self.eqTol * self.nlp.normJac * norm(x), eps);
+            appZero = self.getAppZero(x);
             % The equalities cU - C*x = 0 and C*x - cL = 0 are not likely
             % to happen in practice
             indFree = (self.nlp.cU - Cx >= appZero) & ...
@@ -816,7 +742,7 @@ classdef CflashSolver < solvers.NlpSolver
         end
         
         function [w, iters, info] = trpcg(self, H, g, delta, ...
-                tol, iterMax, indFree, s)
+                tol, iterMax, fixed, s)
             %% TRPCG
             % This subroutine uses a truncated conjugate gradient method to
             % find an approximate minimizer of the trust-region subproblem
@@ -856,7 +782,8 @@ classdef CflashSolver < solvers.NlpSolver
             % Initialize the iterate w and the residual r.
             w = zeros(self.nlp.n, 1);
             % Initialize the residual r of grad q to -g.
-            r = -g;
+            r = -g; % g is already projected
+            %             r = self.eqProjFunc(-g, fixed);
             % Initialize the direction p.
             p = r;
             % Initialize rho and the norms of r.
@@ -872,20 +799,6 @@ classdef CflashSolver < solvers.NlpSolver
             end
             
             for iters = 1:iterMax
-                appZero = max(self.eqTol * self.nlp.normJac * norm(p), ...
-                    eps);
-                Cp = self.nlp.fcon(p);
-                chk = any(Cp(~indFree) >= appZero);
-                if chk
-                    % Project {p : (C*p)_i = 0} for i such as (C*x)_i = 0
-                    t = tic;
-                    p = self.eqProjFunc(p, ~indFree);
-                    self.clock.spcg.trpcg.eqproj = self.clock.spcg.trpcg.eqproj + toc(t);
-                end
-                
-                % Cp = self.nlp.fcon(p); % Computes C*p
-                % normCp = norm(Cp(~indFree)); % Should be near 0
-                % self.logger.debug(sprintf('\t||(C*p)_i|| = %7.3e', normCp));
                 
                 % Compute alph and determine sigma such that the trust
                 % region constraint || w + sigma*p || = delta is satisfied.
@@ -923,7 +836,7 @@ classdef CflashSolver < solvers.NlpSolver
                 
                 % Update w and the residuals r.
                 w = w + alph*p;
-                r = r - alph*q;
+                r = r - alph*self.eqProjFunc(q, fixed);
                 % Exit if the residual convergence test is satisfied.
                 rtr = r'*r;
                 rnorm = sqrt(rtr);
@@ -936,6 +849,7 @@ classdef CflashSolver < solvers.NlpSolver
                 end
                 % Compute p = r + betaFactor*p and update rho.
                 betaFactor = rtr/rho;
+                % Since r is always projected, p is also projected
                 p = r + betaFactor*p;
                 rho = rtr;
             end % for loop
@@ -960,7 +874,7 @@ classdef CflashSolver < solvers.NlpSolver
             Cw = self.nlp.fcon(w); % C*w
             
             % Smallest approximation is eps
-            appZero = max(self.eqTol * self.nlp.normJac * norm(x), eps);
+            appZero = self.getAppZero(x);
             
             % Lower constraint intersections: C*x - cL > 0 & C*w < 0
             dec = (Cx - self.nlp.cL >= appZero) & (Cw <= appZero);
@@ -982,6 +896,10 @@ classdef CflashSolver < solvers.NlpSolver
             brptMin = min([brptInc; brptDec; inf]);
             brptMax = max([brptInc; brptDec; -inf]);
         end % breakpt
+        
+        function appZero = getAppZero(self, x)
+            appZero = max(self.eqTol * self.nlp.normJac * norm(x), eps);
+        end
         
         function wProj = callPcg(self, d, fixed)
             %% CallPcg
@@ -1011,7 +929,7 @@ classdef CflashSolver < solvers.NlpSolver
             subCCt = self.JacJact(fixed, fixed);
             
             [z, ~, ~] = pcg(subCCt, subC*(-d), ...
-                self.aOptTol + self.rOptTol, self.nlp.n);
+                self.eqTol, self.nlp.n);
             wProj = d + (subC' * z);
             
             self.nProj = self.nProj + 1;
