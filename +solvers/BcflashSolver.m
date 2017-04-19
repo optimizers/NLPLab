@@ -57,7 +57,7 @@ classdef BcflashSolver < solvers.NlpSolver
             p.addParameter('backtracking', true);
             p.addParameter('maxIterLS', 10);
             p.addParameter('suffDec', 1e-4);
-
+            
             p.parse(varargin{:});
             
             self = self@solvers.NlpSolver(nlp, p.Unmatched);
@@ -87,6 +87,7 @@ classdef BcflashSolver < solvers.NlpSolver
             self.iter = 1;
             self.iterCg = 1;
             self.iStop = self.EXIT_NONE;
+            self.nSuccessIter = 0;
             self.nlp.resetCounters();
             
             
@@ -134,6 +135,9 @@ classdef BcflashSolver < solvers.NlpSolver
                     self.iStop = self.EXIT_FEAS_TOL;
                 elseif self.iter >= self.maxIter
                     self.iStop = self.EXIT_MAX_ITER;
+                elseif self.nlp.ncalls_fobj + self.nlp.ncalls_fcon >= ...
+                        self.maxEval
+                    self.iStop = self.EXIT_MAX_EVAL;
                 elseif toc(self.solveTime) >= self.maxRT
                     self.iStop = self.EXIT_MAX_RT;
                 end
@@ -511,14 +515,15 @@ classdef BcflashSolver < solvers.NlpSolver
             %                not allow further progress.
             %
             %      info = 3  Failure to converge within iterMax iters.
-            Hs = H * s;
+            
             % Compute the Cauchy point
             x = xk + s;
-            % Start the main iter loop.
+            Hs = H * s;
+            
             % There are at most n iters because at each iter
             % at least one variable becomes active.
             iters = 1;
-            for nfaces = 1:self.nlp.n
+            for nFaces = 1:self.nlp.n
                 
                 % Determine the free variables at the current minimizer.
                 % The indices of the free variables are stored in the first
@@ -536,22 +541,22 @@ classdef BcflashSolver < solvers.NlpSolver
                 % Recall that w contains  H*(x[k] - x[0]).
                 % Compute the norm of the reduced gradient Z'*g.
                 wa = g(indFree);
-                gFree = Hs(indFree) + wa;
-                gfNorm = norm(wa);
+                gQuad = Hs(indFree) + wa;
+                gNorm = norm(wa);
                 
                 % Solve the trust region subproblem in the free variables
                 % to generate a direction p[k]. Store p[k] in the array w.
-                tol = self.cgTol * gfNorm;
+                tol = self.cgTol * gNorm;
                 
                 Hfree = H(indFree, indFree);
                 
                 [w, iterTR, infoTR] = solvers.BcflashSolver.trpcg( ...
-                    Hfree, gFree, delta, tol, self.maxIterCg, s(indFree));
+                    Hfree, gQuad, delta, tol, self.maxIterCg, s(indFree));
                 iters = iters + iterTR;
                 
                 % Use a projected search to obtain the next iterate.
                 % The projected search algorithm stores s[k] in w.
-                w = self.prsrch(Hfree, x(indFree), gFree, w, ...
+                w = self.prsrch(Hfree, x(indFree), gQuad, w, ...
                     indFree);
                 
                 % Update the minimizer and the step.
@@ -566,7 +571,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 % We terminate if the preconditioned conjugate gradient
                 % method encounters a direction of negative curvature, or
                 % if the step is at the trust region bound.
-                if norm(Hs(indFree) + g(indFree)) <= self.cgTol * gfNorm
+                if norm(Hs(indFree) + wa) <= tol
                     info = 1;
                     break;
                 elseif infoTR == 2 || infoTR == 3
