@@ -167,7 +167,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 [alphc, s] = self.cauchy(H, x, g, delta, alphc);
                 
                 % Projected Newton step
-                [x, s, ~] = self.spcg(H, x, g, delta, s);
+                [x, s] = self.spcg(H, x, g, delta, s);
                 
                 % Compute the objective at this new point
                 f = self.nlp.fobj(x);
@@ -462,7 +462,7 @@ classdef BcflashSolver < solvers.NlpSolver
             s = self.gpstep(x, alph, w, indFree); % s = P[x + alph*w] - x
         end % prsrch
         
-        function [x, s, info] = spcg(self, H, xk, g, delta, s)
+        function [x, s] = spcg(self, H, x, g, delta, s)
             %% SPCG - Minimize a bound-constraint quadratic
             %
             % This subroutine generates a sequence of approximate
@@ -503,21 +503,9 @@ classdef BcflashSolver < solvers.NlpSolver
             % The subroutine terminates when the trust region bound does
             % not allow further progress, that is, || p[k] || = delta.
             % In this case the final x satisfies q(x) < q(x[k]).
-            %
-            % On exit info is set as follows:
-            %
-            %      info = 1  Convergence. The final step s satisfies
-            %                || (g + H*s)[free] || <= rTol*|| g[free] ||,
-            %                and the final x is an approximate minimizer
-            %                in the face defined by the free variables.
-            %
-            %      info = 2  Termination. The trust region bound does
-            %                not allow further progress.
-            %
-            %      info = 3  Failure to converge within iterMax iters.
             
             % Compute the Cauchy point
-            x = xk + s;
+            x = x + s;
             Hs = H * s;
             
             % There are at most n iters because at each iter
@@ -532,7 +520,6 @@ classdef BcflashSolver < solvers.NlpSolver
                 
                 % Exit if there are no free constraints
                 if ~any(indFree)
-                    info = 1;
                     break;
                 end
                 
@@ -571,19 +558,12 @@ classdef BcflashSolver < solvers.NlpSolver
                 % We terminate if the preconditioned conjugate gradient
                 % method encounters a direction of negative curvature, or
                 % if the step is at the trust region bound.
-                if norm(Hs(indFree) + wa) <= tol
-                    info = 1;
-                    break;
-                elseif infoTR == 2 || infoTR == 3
-                    info = 2;
-                    break;
-                elseif iters > self.maxIterCg
-                    info = 3;
+                if norm(Hs(indFree) + wa) <= tol || infoTR == 2 || ...
+                        infoTR == 3 || iters > self.maxIterCg || ...
+                        toc(self.solveTime) >= self.maxRT
                     break;
                 end
-                
             end % faces
-            
             self.iterCg = self.iterCg + iters;
         end % spcg
         

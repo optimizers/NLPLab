@@ -1,4 +1,4 @@
-function [xNew, fNew, failed, t] = nonMonotoneArmijo(solver, x, f, g, d)
+function [xNew, fNew, failed, t] = nonMonotoneArmijo(solver, x, ~, g, d)
 %% NmArmijo - Non-monotone Armijo Line Search with SPG step length
 % Inputs:
 %   - solver: NlpSolver object. Must possess suffDec, maxIterLS, memory and

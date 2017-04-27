@@ -12,19 +12,19 @@ classdef BbSolver < solvers.NlpSolver
         storedObjFunc;
         suffDec;
         maxProj;
-        
         bbFunc;
         storedAlph;
         tau;
         
+        stats;
     end % private properties
     
     properties (Hidden = true, Constant)
         LOG_HEADER = { ...
-            'Iteration', 'FunEvals', 'Projections', 'Alph', ...
-            'Function Val', '||Pg||'};
-        LOG_FORMAT = '%10s %10s %10s %15s %15s %15s\n';
-        LOG_BODY = '%10d %10d %10d %15.5e %15.5e %15.5e\n';
+            '# iter', '# obj. func.', '# proj', 't', 'alpha', ...
+            'f(x)', '||Pg||'};
+        LOG_FORMAT = '%10s %10s %10s %10s %10s %10s %10s %10s\n';
+        LOG_BODY = '%10d %10d %10d %10.2e %10.2e %10.4e %10.4e %10.4e\n';
         ALPH_MIN = 1e-10;
         ALPH_MAX = 1e5;
         SIG_1 = 0.1;
@@ -103,6 +103,10 @@ classdef BbSolver < solvers.NlpSolver
                     self.bbFunc = @(xOld, x, gOld, g) ...
                         self.bbStep(xOld, x, gOld, g);
             end
+            self.stats.proj = struct;
+            self.stats.proj.info = [0, 0, 0];
+            self.stats.proj.infoHeader = {'avg pgNorm', ...
+                'avg solveTime', 'total solveTime'};
         end % constructor
         
         function self = solve(self)
@@ -116,6 +120,17 @@ classdef BbSolver < solvers.NlpSolver
             self.nProj = 0;
             self.iter = 1;
             
+            % Make sure point is feasible
+            x = self.project(self.nlp.x0);
+            % Evaluate initial point & derivative
+            [f, g] = self.nlp.obj(x);
+            
+            fOld = inf;
+            
+            % Relative stopping tolerance
+            self.rOptTol = self.aOptTol * norm(g);
+            self.rFeasTol = self.aFeasTol * abs(f);
+            
             printObj = utils.PrintInfo('Bb');
             
             % Output Log
@@ -127,17 +142,6 @@ classdef BbSolver < solvers.NlpSolver
                 printObj.header(self, extra);
                 fprintf(self.LOG_FORMAT, self.LOG_HEADER{:});
             end
-            
-            % Make sure point is feasible
-            x = self.project(self.nlp.x0);
-            % Evaluate initial point & derivative
-            [f, g] = self.nlp.obj(x);
-            
-            fOld = inf;
-            
-            % Relative stopping tolerance
-            self.rOptTol = self.aOptTol * norm(g);
-            self.rFeasTol = self.aFeasTol * abs(f);
             
             % Initial descent direction is the steepest descent
             alph = 1;
@@ -153,7 +157,7 @@ classdef BbSolver < solvers.NlpSolver
 
                 if self.verbose >= 2
                     self.printf(self.LOG_BODY, self.iter, ...
-                        self.nObjFunc, self.nProj, t, f, pgnrm);
+                        self.nObjFunc, self.nProj, t, alph, f, pgnrm);
                 end
                 
                 % Checking stopping conditions
@@ -241,6 +245,17 @@ classdef BbSolver < solvers.NlpSolver
                 % Propagate throughout the program to exit
                 self.iStop = self.EXIT_PROJ_FAILURE;
             end
+            
+            % This can be removed later
+            if isprop(self.nlp, 'projSolver')
+                solver = self.nlp.projSolver;
+                % Cumulative average of ||Pg|| & solv. time & total solv.
+                self.stats.proj.info = [(self.nProj * ...
+                    self.stats.proj.info(1:2) + [solver.pgNorm, ...
+                    solver.solveTime])/(self.nProj + 1), ...
+                    self.stats.proj.info(3) + solver.solveTime];
+            end
+            
             self.nProj = self.nProj + 1;
         end
         

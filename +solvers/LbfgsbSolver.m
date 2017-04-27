@@ -62,7 +62,8 @@ classdef LbfgsbSolver < solvers.NlpSolver
             
             self.iStop = self.EXIT_OPT_TOL;
             self.solved = true;
-            if ~strcmp(stopReason(1:4), 'CONV') && ...
+            if strcmp(stopReason(1:2), 'RT') || ...
+                    ~strcmp(stopReason(1:4), 'CONV') && ...
                     ~strcmp(stopReason(1:4), 'NCON')
                 self.iStop = self.EXIT_INNER_FAIL;
                 self.solved = false;

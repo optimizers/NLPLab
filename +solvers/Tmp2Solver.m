@@ -63,20 +63,16 @@ classdef Tmp2Solver < solvers.NlpSolver
         maxIterLS; % Maximal number of iterations during linesearch
         fid;
         krylOpts;
-        
         method;
-        
         descDirFunc;
         lsFunc;
-        saveD = {};
-        saveRnorm = {};
     end % private properties
     
     properties (Hidden = true, Constant)
-        LOG_HEADER = {'Iteration','FunEvals', 'Step Length', ...
-            'Function Val', '||Pg||', 'g''*d'};
-        LOG_FORMAT = '%10s %10s %15s %15s %15s %15s\n';
-        LOG_BODY = '%10d %10d %15.5e %15.5e %15.5e %15.5e\n';
+        LOG_HEADER = {'# iter', '# obj. func.', 't', ...
+            'f(x)', '||Pg||', 'g''*d'};
+        LOG_FORMAT = '%10s %10s %10s %10s %10s %10s\n';
+        LOG_BODY = '%10d %10d %10.4e %10.4e %10.4e %10.4e\n';
     end % constant properties
     
     
@@ -102,7 +98,7 @@ classdef Tmp2Solver < solvers.NlpSolver
             p.addParameter('method', 'pcg');
             p.addParameter('fid', 1);
             p.addParameter('maxIterLS', 50); % Max iters for linesearch
-            p.addParameter('projLS', true); % Projected line search
+            p.addParameter('lsType', 'proj');
             p.parse(varargin{:});
             
             self = self@solvers.NlpSolver(nlp, p.Unmatched);
@@ -125,54 +121,67 @@ classdef Tmp2Solver < solvers.NlpSolver
             self.krylOpts.itnlim = self.nlp.n;
             
             % Setting the descent direction computation function
-            if strcmp(p.Results.method, 'lsqr')
-                % LSQR - NlpModel must be a LeastSquaresModel!
-                if  ~isa(nlp, 'model.LeastSquaresModel')
-                    error(['nlp must be a model.LeastSquaresModel in', ...
-                        ' order to use LSQR.']);
-                end
-                self.krylOpts.etol = self.aOptTol * 10^-5;
-                self.krylOpts.rtol = self.aOptTol * 10^-5;
-                self.krylOpts.atol = self.aOptTol * 10^-5;
-                self.krylOpts.btol = self.aOptTol * 10^-5;
-                import krylov.lsqr_spot;
-                self.descDirFunc = @(self, x, g, H, working) ...
-                    self.callLsqr(x, working);
-            elseif strcmp(p.Results.method, 'lsmr')
-                % LSMR - NlpModel must be a LeastSquaresModel!
-                if  ~isa(nlp, 'model.LeastSquaresModel')
-                    error(['nlp must be a model.LeastSquaresModel in', ...
-                        ' order to use LSMR.']);
-                end
-                self.krylOpts.etol = self.aOptTol * 10^-5;
-                self.krylOpts.rtol = self.aOptTol * 10^-5;
-                self.krylOpts.atol = self.aOptTol * 10^-5;
-                self.krylOpts.btol = self.aOptTol * 10^-5;
-                import krylov.lsmr_spot;
-                self.descDirFunc = @(self, x, g, H, working) ...
-                    self.callLsmr(x, working);
-            elseif strcmp(p.Results.method, 'minres')
-                % MinRes
-                import krylov.minres_spot;
-                self.descDirFunc = @(self, x, g, H, working) ...
-                    self.callMinres(g, H, working);
-            else
-                % Default to PCG
-                self.descDirFunc = @(self, x, g, H, working) ...
-                    self.callPcg(g, H, working);
+            switch p.Results.method
+                case 'lsqr'
+                    % LSQR - NlpModel must be a LeastSquaresModel!
+                    if  ~isa(nlp, 'model.LeastSquaresModel')
+                        error(['nlp must be a model.LeastSquaresModel', ...
+                            ' in order to use LSQR.']);
+                    end
+                    self.krylOpts.etol = self.aOptTol * 10^-5;
+                    self.krylOpts.rtol = self.aOptTol * 10^-5;
+                    self.krylOpts.atol = self.aOptTol * 10^-5;
+                    self.krylOpts.btol = self.aOptTol * 10^-5;
+                    import krylov.lsqr_spot;
+                    self.descDirFunc = @(self, x, g, H, working) ...
+                        self.callLsqr(x, working);
+                case 'lsmr'
+                    % LSMR - NlpModel must be a LeastSquaresModel!
+                    if  ~isa(nlp, 'model.LeastSquaresModel')
+                        error(['nlp must be a model.LeastSquaresModel', ...
+                            ' in order to use LSMR.']);
+                    end
+                    self.krylOpts.etol = self.aOptTol * 10^-5;
+                    self.krylOpts.rtol = self.aOptTol * 10^-5;
+                    self.krylOpts.atol = self.aOptTol * 10^-5;
+                    self.krylOpts.btol = self.aOptTol * 10^-5;
+                    import krylov.lsmr_spot;
+                    self.descDirFunc = @(self, x, g, H, working) ...
+                        self.callLsmr(x, working);
+                case 'minres'
+                    % MinRes
+                    import krylov.minres_spot;
+                    self.descDirFunc = @(self, x, g, H, working) ...
+                        self.callMinres(g, H, working);
+                case 'pcg'
+                    % Default to PCG
+                    self.descDirFunc = @(self, x, g, H, working) ...
+                        self.callPcg(g, H, working);
+                otherwise
+                    % Default to PCG
+                    self.descDirFunc = @(self, x, g, H, working) ...
+                        self.callPcg(g, H, working);
             end
             
             import utils.PrintInfo;
             
-            if p.Results.projLS
-                import linesearch.projectedArmijo;
-                self.lsFunc = @(x, f, g, d) ...
-                    linesearch.projectedArmijo(self, x, f, g, d);
-            else
-                % Project the step first!
-                import linesearch.armijo;
-                self.lsFunc = @(x, f, g, d) ...
-                    self.projectThenArmijo(self, x, f, g, d);
+            switch p.Results.lsType
+                case 'proj'
+                    import linesearch.projectedArmijo;
+                    self.lsFunc = @(x, f, g, d, ~) ...
+                        linesearch.projectedArmijo(self, x, f, g, d);
+                case 'ls'
+                    % Project the step first!
+                    import linesearch.armijo;
+                    self.lsFunc = @(x, f, g, d, ~) ...
+                        self.projectThenArmijo(self, x, f, g, d);
+                case 'exact'
+                    self.lsFunc = @(x, ~, g, d, H) ...
+                        self.exactLS(x, g, d, H);
+                otherwise
+                    import linesearch.projectedArmijo;
+                    self.lsFunc = @(x, f, g, d, ~) ...
+                        linesearch.projectedArmijo(self, x, f, g, d);
             end
         end % constructor
         
@@ -251,7 +260,7 @@ classdef Tmp2Solver < solvers.NlpSolver
                 d = zeros(self.nlp.n, 1);
                 % Solve H * d = -g on the working variables
                 d(working) = self.descDirFunc(self, x, g, H, working);
-
+                
                 % Check that progress can be made along the direction
                 gtd = g' * d;
                 if gtd > -self.aOptTol * norm(g) * norm(d) - self.aOptTol
@@ -262,7 +271,7 @@ classdef Tmp2Solver < solvers.NlpSolver
                 
                 % Check sufficient decrease condition and do a linesearch
                 fOld = f;
-                [x, f, failed, t] = self.lsFunc(x, f, g, d);
+                [x, f, failed, t] = self.lsFunc(x, f, g, d, H);
                 
                 % Update g and H at new x
                 [~, g, H] = self.nlp.obj(x);
@@ -370,6 +379,19 @@ classdef Tmp2Solver < solvers.NlpSolver
             d = self.project(x - d) - x;
             [x, f, failed, t] = linesearch.armijo(x, f, g, d);
         end
+        
+        function xNew = exactLS(self, x, g, d, H)
+            %% ExactLS - Exact line search
+            % xNew is projected at the end to ensure the value remains
+            % within the bounds.
+            % Project the descent direction
+            d = self.project(x - d) - x;
+            % Step length must stay between 0 and 1
+            t = min(max((d' * -g) / (d' * H * d), eps), 1);
+            % Take step and project to make sure bounds are satisfied
+            xNew = self.project(x + t * d);
+        end
+        
     end % private methods
     
 end % class

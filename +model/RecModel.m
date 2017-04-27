@@ -120,6 +120,8 @@ classdef RecModel < model.NlpModel
                 @(z, mode) self.precMult(z, mode));
             self.JacJact = opFunction(self.m, self.m, ...
                 @(z, mode) real(self.prec.AdjointDirect(z)));
+            self.JacJact = opFunction(self.m, self.m, ...
+                @(z, mode) real(self.prec.AdjointDirect(z)));
         end
         
         % Override the default NlpModel methods

@@ -76,19 +76,17 @@ classdef IpoptSolver < solvers.NlpSolver
             elseif self.verbose == 1
                 self.options.ipopt.print_level = 3;
             else
-               self.options.ipopt.print_level = 12; 
+               self.options.ipopt.print_level = 5; 
             end
             self.options.ipopt.tol = self.aOptTol;
-%             gNorm = norm(self.nlp.gobj(self.nlp.x0));
-%             self.options.ipopt.acceptable_tol = max( ...
-%                 gNorm * self.aOptTol, eps); % can't be 0
             self.options.ipopt.max_iter = self.maxIter;
             self.options.ipopt.max_cpu_time = self.maxRT;
             self.options.ipopt.dual_inf_tol = self.aCompTol;
             self.options.ipopt.constr_viol_tol = self.aOptTol;
             self.options.ipopt.compl_inf_tol = self.aCompTol;
             self.options.ipopt.obj_scaling_factor = self.nlp.obj_scale;
-            % self.options.ipopt.hessian_approximation = 'limited-memory';
+            self.options.ipopt.nlp_scaling_method = 'none';
+            self.options.ipopt.acceptable_iter = 0;
         end
         
         function self = solve(self)
