@@ -144,6 +144,11 @@ classdef NlpSolver < handle
                 self.iStop == self.EXIT_MAX_ITER_LS);
         end
         
+        function setOptTol(self, tol)
+            %% TEST
+            self.aOptTol = tol;
+        end
+        
     end % public methods
     
     
