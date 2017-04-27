@@ -23,8 +23,8 @@ classdef BbSolver < solvers.NlpSolver
         LOG_HEADER = { ...
             '# iter', '# obj. func.', '# proj', 't', 'alpha', ...
             'f(x)', '||Pg||'};
-        LOG_FORMAT = '%10s %10s %10s %10s %10s %10s %10s \n';
-        LOG_BODY = '%10d %10d %10d %10.2e %10.2e %10.4e %10.4e\n';
+        LOG_FORMAT = '%10s %10s %10s %15s %15s %15s %15s\n';
+        LOG_BODY = '%10d %10d %10d %15.2e %15.2e %15.4e %15.4e\n';
         ALPH_MIN = 1e-10;
         ALPH_MAX = 1e5;
         SIG_1 = 0.1;
