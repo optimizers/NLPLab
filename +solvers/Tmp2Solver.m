@@ -71,8 +71,8 @@ classdef Tmp2Solver < solvers.NlpSolver
     properties (Hidden = true, Constant)
         LOG_HEADER = {'# iter', '# obj. func.', 't', ...
             'f(x)', '||Pg||', 'g''*d'};
-        LOG_FORMAT = '%10s %10s %10s %10s %10s %10s\n';
-        LOG_BODY = '%10d %10d %10.4e %10.4e %10.4e %10.4e\n';
+        LOG_FORMAT = '%10s %10s %15s %15s %15s %15s\n';
+        LOG_BODY = '%10d %10d %15.4e %15.4e %15.4e %15.4e\n';
     end % constant properties
     
     
