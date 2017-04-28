@@ -174,10 +174,10 @@ classdef Tmp2Solver < solvers.NlpSolver
                     % Project the step first!
                     import linesearch.armijo;
                     self.lsFunc = @(x, f, g, d, ~) ...
-                        self.projectThenArmijo(self, x, f, g, d);
+                        self.projectThenArmijo(x, f, g, d);
                 case 'exact'
-                    self.lsFunc = @(x, ~, g, d, H) ...
-                        self.exactLS(x, g, d, H);
+                    self.lsFunc = @(x, f, g, d, H) ...
+                        self.exactLS(x, f, g, d, H);
                 otherwise
                     import linesearch.projectedArmijo;
                     self.lsFunc = @(x, f, g, d, ~) ...
@@ -376,20 +376,21 @@ classdef Tmp2Solver < solvers.NlpSolver
         function [x, f, failed, t] = projectThenArmijo(self, x, f, g, d)
             %% ProjectThenArmijo
             % Project the descent direction, then do Armijo backtracking.
-            d = self.project(x - d) - x;
-            [x, f, failed, t] = linesearch.armijo(x, f, g, d);
+            d = self.project(x + d) - x;
+            [x, f, failed, t] = linesearch.armijo(self, x, f, g, d);
         end
         
-        function xNew = exactLS(self, x, g, d, H)
+        function [xNew, f, failed, t] = exactLS(self, x, f, g, d, H)
             %% ExactLS - Exact line search
             % xNew is projected at the end to ensure the value remains
             % within the bounds.
             % Project the descent direction
-            d = self.project(x - d) - x;
+            failed = false;
+            d = self.project(x + d) - x;
             % Step length must stay between 0 and 1
-            t = min(max((d' * -g) / (d' * H * d), eps), 1);
+            t = min(max((d' * -g) / (d' * H * d), 1e-10), 1);
             % Take step and project to make sure bounds are satisfied
-            xNew = self.project(x + t * d);
+            xNew = x + t * d;
         end
         
     end % private methods
