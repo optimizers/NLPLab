@@ -242,11 +242,6 @@ classdef CflashSolver < solvers.NlpSolver
                 [~, nFree] = self.getIndFree(x);
                 pgNorm = norm(self.gpstep(x, -1, g));
                 
-%                 % Setting proj & eqProj tolerance relative to pgNorm
-%                 if isprop(self.nlp, 'projSolver')
-%                     self.nlp.projSolver.setOptTol(pgNorm * 1e-6);
-%                 end
-                
                 if pgNorm <= self.rOptTol + self.aOptTol
                     self.iStop = self.EXIT_OPT_TOL;
                 elseif f < self.fMin
@@ -598,7 +593,7 @@ classdef CflashSolver < solvers.NlpSolver
                 self.logger.debug(sprintf('\t||s|| = %7.3e', norm(s)));
                 gts = g' * s;
                 if 0.5 * s'*H*s + gts <= self.mu0 * gts
-                    break;
+                    return
                 end
                 % This is a crude interpolation procedure that
                 % will be replaced in future versions of the code.

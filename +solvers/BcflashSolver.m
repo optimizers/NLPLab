@@ -444,7 +444,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 s = self.gpstep(x, alph, w, indFree);
                 gts = g' * s;
                 if 0.5 * s'*H*s + gts <= self.mu0 * gts
-                    break;
+                    return
                 end
                 % This is a crude interpolation procedure that
                 % will be replaced in future versions of the code.

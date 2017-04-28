@@ -21,7 +21,7 @@ while true
     % Update objective function value
     fNew = solver.nlp.obj(xNew);
     % Checking exit conditions
-    if (f - fNew) >= (solver.suffDec * t * g' * d)
+    if fNew <= f + (solver.suffDec * t * g' * d)
         % Armijo condition satisfied
         return;
     elseif iterLS >= solver.maxIterLS
