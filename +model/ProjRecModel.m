@@ -1,16 +1,17 @@
 classdef ProjRecModel < model.RecModel
-    %% ProjRecModel - Extension of RecModel for solvers w. proj. sub.-prob.
+    %% ProjRecModel - Extension of RecModel for solvers with projections
     %   This model provides a 
     %           z = project(self, x)
     %   method that projects on the constraint set C*x >= 0. This model is
-    %   required if a projection method is used on RecModel. For instance,
-    %   minConf-nlp and Cflash require a ProjRecModel.
+    %   required if a RecModel is solved using projections on the
+    %   constraint set.
     %
-    %   This class must receive a projection model (projModel) and a 
-    %   projection sub-problem solver accordingly.
+    %   This class must receive a projection solver which's "solve"
+    %   function comes down to projecting x on C*x >= 0.
     %
-    %   For additional information, look in the RecModel class.
-    
+    %   For additional information, look in the RecModel and ProjModel
+    %   classes.
+
     
     properties (SetAccess = private, Hidden = false)
         % The solver used to solve projModel
@@ -54,6 +55,7 @@ classdef ProjRecModel < model.RecModel
                error('projSolver must be a subclass of solvers.NlpSolver');
             end
             
+            % Storing the projection sub-problem solver
             self.projSolver = projSolver;
             % Getting projModel's normJac property
             self.normJac = self.projSolver.nlp.normJac;
@@ -62,7 +64,10 @@ classdef ProjRecModel < model.RecModel
         function z = project(self, x)
             %% Project - Call Solve from projSolver
             % This will call projSolver's solve function that solves the
-            % projection sub-problem defined by the nlp model is possesses.
+            % projection sub-problem. Note that we solve the dual
+            % projection problem, which comes down to a bounded least
+            % squares problem, and is much easier to solve. Look inside
+            % ProjModel for more information.
             % Input:
             %   - x: vector to project on C*x >= 0
             % Output:
@@ -80,6 +85,53 @@ classdef ProjRecModel < model.RecModel
             % Finding the primal variable from the dual variable
             z = self.projSolver.nlp.dualToPrimal(self.projSolver.x);
         end
+        
+        function z = projectMixed(self, x, fixed)
+            %% ProjectMixed
+            % This function computes the projection of x on C*x >= 0 while
+            % staying on the active face at x, defined by the logical array
+            % fixed. In other words, we search x such that
+            %
+            %   min     1/2 || x - \bar{x} ||^2
+            %     x     A*C*x >= 0,
+            %           B*C*x = 0,
+            %
+            % where B is the restriction matrix defined by "fixed" and A
+            % contains the other rows of the identity. This problem is 
+            % highly similar to the original projection sub-problem, thus 
+            % the same solver and model can be reused.
+            % Input:
+            %   - x: vector to project : {x | A*C*x >= 0, B*C*x = 0}
+            % Output:
+            %   - xProj: the projection of x
+            
+            % Variable that we desire to project on the constraint set
+            % Here x is \bar{x}
+            self.projSolver.nlp.setPointToProject(x);
+            
+            % Temporarily set the components B*z unbounded, where z are the
+            % Lagrange multipliers of C*x >= 0.
+            bL = self.projSolver.nlp.bL(fixed);
+            jLow = self.projSolver.nlp.jLow(fixed);
+            self.projSolver.nlp.bL(fixed) = -inf;
+            self.projSolver.nlp.jLow(fixed) = false;
+            
+            % Calling the solver to solve the problem
+            self.projSolver.solve();
+            
+            % Reset the bounds to what they were
+            self.projSolver.nlp.bL(fixed) = bL;
+            self.projSolver.nlp.jLow(fixed) = jLow;
+            
+            self.solved = self.projSolver.solved;
+            
+            % Finding the primal variable from the dual variable
+            z = self.projSolver.nlp.dualToPrimal(self.projSolver.x);
+        end
+        
+        % function z = projectActiveFace(self, x)
+        % ... is not implemented here. See CflashSolver for a generic 
+        % implementation.
     end
     
 end

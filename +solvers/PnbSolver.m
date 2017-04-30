@@ -234,17 +234,25 @@ classdef PnbSolver < solvers.NlpSolver
     
     methods (Access = private)
         
-        function z = project(self, x)
+        function x = project(self, x)
             %% Project
             % Project on the bounds assuming x is full-sized.
-            z = min(max(x, self.nlp.bL), self.nlp.bU);
+            x(self.nlp.jLow) = max(x(self.nlp.jLow), ...
+                self.nlp.bL(self.nlp.jLow));
+            x(self.nlp.jUpp) = min(x(self.nlp.jUpp), ...
+                self.nlp.bU(self.nlp.jUpp));
+%             x = min(max(x, self.nlp.bL), self.nlp.bU);
         end
         
-        function z = projectSel(self, x, ind)
+        function x = projectSel(self, x, ind)
             %% ProjectSel
             % Project on the bounds for a selected set of indices, assuming
             % x is of reduced size.
-            z = min(max(x, self.nlp.bL(ind)), self.nlp.bU(ind));
+            x(self.nlp.jLow(ind)) = max(x(self.nlp.jLow(ind)), ...
+                self.nlp.bL(self.nlp.jLow(ind)));
+            x(self.nlp.jUpp(ind)) = min(x(self.nlp.jUpp(ind)), ...
+                self.nlp.bU(self.nlp.jUpp(ind)));
+%             x = min(max(x, self.nlp.bL(ind)), self.nlp.bU(ind));
         end
         
         function working = getWorkingSet(self, x, g, H)
@@ -257,8 +265,16 @@ classdef PnbSolver < solvers.NlpSolver
             %   - working: bool array of free variables
             
             % Find gradient fixed set
-            gFixed = (x == self.nlp.bL & g > 0) | ...
-                (x == self.nlp.bU & g < 0);
+            gFixed = false(self.nlp.n, 1);
+            gFixed(self.nlp.jLow) = ...
+                (x(self.nlp.jLow) == self.nlp.bL(self.nlp.jLow) ...
+                & g(self.nlp.jLow) > 0);
+            gFixed(self.nlp.jUpp) = ...
+                (x(self.nlp.jUpp) == self.nlp.bU(self.nlp.jUpp) ...
+                & g(self.nlp.jUpp) < 0);
+
+%             gFixed = (x == self.nlp.bL & g > 0) | ...
+%                 (x == self.nlp.bU & g < 0);
             
             % Save gradient fixed set
             fixed = gFixed;
@@ -272,16 +288,24 @@ classdef PnbSolver < solvers.NlpSolver
             d = self.descDirFunc(self, x, ...
                 g(~gFixed), H(~gFixed, ~gFixed), ~gFixed);
             
-            % We restrict x to the free variables
-            x = x(~gFixed);
+            jLow = self.nlp.jLow(~gFixed);
+            jUpp = self.nlp.jUpp(~gFixed);
             
-            % Update the gradient fixed set with the Newton fixed set
-            % fixed := gradient fixed set | Newton fixed set
-            fixed(~gFixed) = (x == self.nlp.bL(~gFixed) & d < 0) | ...
-                (x == self.nlp.bU(~gFixed) & d > 0);
+            fixed(jLow) = (x(jLow) == self.nlp.bL(jLow) & d(jLow) < 0);
+            fixed(jUpp) = (x(jUpp) == self.nlp.bU(jUpp) & d(jUpp) > 0);
             
-            % Finally, the working set represents the free variables
             working = ~fixed;
+            
+%             % We restrict x to the free variables
+%             x = x(~gFixed);
+%             
+%             % Update the gradient fixed set with the Newton fixed set
+%             % fixed := gradient fixed set | Newton fixed set
+%             fixed(~gFixed) = (x == self.nlp.bL(~gFixed) & d < 0) | ...
+%                 (x == self.nlp.bU(~gFixed) & d > 0);
+%             
+%             % Finally, the working set represents the free variables
+%             working = ~fixed;
         end
         
         function d = callPcg(self, g, H)

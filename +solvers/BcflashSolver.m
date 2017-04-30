@@ -18,6 +18,8 @@ classdef BcflashSolver < solvers.NlpSolver
         backtracking;
         suffDec;
         maxIterLS;
+        
+        clock = struct;
     end
     
     properties (Hidden = true, Constant)
@@ -90,6 +92,16 @@ classdef BcflashSolver < solvers.NlpSolver
             self.nSuccessIter = 0;
             self.nlp.resetCounters();
             
+            
+            %%%
+            self.clock.cauchyInterp = 0;
+            self.clock.cauchyExtrap = 0;
+            self.clock.cauchy = 0;
+            self.clock.spcg = 0;
+            self.clock.spcgTrpcg = 0;
+            self.clock.spcgPrsrch = 0;
+            self.clock.spcgPrsrchInterp = 0;
+            %%%
             
             printObj = utils.PrintInfo('bcflash');
             
@@ -164,10 +176,14 @@ classdef BcflashSolver < solvers.NlpSolver
                 H = self.nlp.hobj(x);
                 
                 % Cauchy step
+                t = tic;
                 [alphc, s] = self.cauchy(H, x, g, delta, alphc);
+                self.clock.cauchy = self.clock.cauchy + toc(t);
                 
                 % Projected Newton step
+                t = tic;
                 [x, s] = self.spcg(H, x, g, delta, s);
+                self.clock.spcg = self.clock.spcg + toc(t);
                 
                 % Compute the objective at this new point
                 f = self.nlp.fobj(x);
@@ -236,9 +252,17 @@ classdef BcflashSolver < solvers.NlpSolver
             %% Project
             % Project a vector onto the box defined by bL, bU.
             if nargin > 2
-                x = min(self.nlp.bU(ind), max(x, self.nlp.bL(ind)));
+                x(self.nlp.jLow(ind)) = max(x(self.nlp.jLow(ind)), ...
+                    self.nlp.bL(self.nlp.jLow(ind)));
+                x(self.nlp.jUpp(ind)) = min(x(self.nlp.jUpp(ind)), ...
+                    self.nlp.bU(self.nlp.jUpp(ind)));
+%                 x = min(self.nlp.bU(ind), max(x, self.nlp.bL(ind)));
             else
-                x = min(self.nlp.bU, max(x, self.nlp.bL));
+                x(self.nlp.jLow) = max(x(self.nlp.jLow), ...
+                    self.nlp.bL(self.nlp.jLow));
+                x(self.nlp.jUpp) = min(x(self.nlp.jUpp), ...
+                    self.nlp.bU(self.nlp.jUpp));
+%                 x = min(self.nlp.bU, max(x, self.nlp.bL));
             end
         end
         
@@ -350,6 +374,7 @@ classdef BcflashSolver < solvers.NlpSolver
             
             % Either interpolate or extrapolate to find a successful step.
             if interp
+                t = tic;
                 % Reduce alph until a successful step is found.
                 while (toc(self.solveTime) < self.maxRT)
                     % This is a crude interpolation procedure that
@@ -363,7 +388,9 @@ classdef BcflashSolver < solvers.NlpSolver
                         end
                     end
                 end
+                self.clock.cauchyInterp = self.clock.cauchyInterp + toc(t);
             else
+                t = tic;
                 % Increase alph until a successful step is found.
                 alphs = alph;
                 while (alph <= brptMax) && ...
@@ -385,6 +412,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 % Recover the last successful step.
                 alph = alphs;
                 s = self.gpstep(x, -alph, g);
+                self.clock.cauchyExtrap = self.clock.cauchyExtrap + toc(t);
             end
             
         end % cauchy
@@ -438,6 +466,7 @@ classdef BcflashSolver < solvers.NlpSolver
             
             % Reduce alph until the sufficient decrease condition is
             % satisfied or x + alph*w is feasible.
+            t = tic;
             while (alph > brptMin) && (toc(self.solveTime) < self.maxRT)
                 % Calculate P[x + alph*w] - x and check the sufficient
                 % decrease condition.
@@ -450,6 +479,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 % will be replaced in future versions of the code.
                 alph = interpf * alph;
             end
+            self.clock.spcgPrsrchInterp = self.clock.spcgPrsrchInterp + toc(t);
             
             % Force at least one more constraint to be added to the active
             % set if alph < brptMin and the full step is not successful.
@@ -537,14 +567,18 @@ classdef BcflashSolver < solvers.NlpSolver
                 
                 Hfree = H(indFree, indFree);
                 
+                t = tic;
                 [w, iterTR, infoTR] = solvers.BcflashSolver.trpcg( ...
                     Hfree, gQuad, delta, tol, self.maxIterCg, s(indFree));
+                self.clock.spcgTrpcg = self.clock.spcgTrpcg + toc(t);
                 iters = iters + iterTR;
                 
                 % Use a projected search to obtain the next iterate.
                 % The projected search algorithm stores s[k] in w.
+                t = tic;
                 w = self.prsrch(Hfree, x(indFree), gQuad, w, ...
                     indFree);
+                self.clock.spcgPrsrch = self.clock.spcgPrsrch + toc(t);
                 
                 % Update the minimizer and the step.
                 % Note that s now contains x[k+1] - x[0].

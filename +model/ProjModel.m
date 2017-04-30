@@ -4,20 +4,22 @@ classdef ProjModel < model.LeastSquaresModel
     %
     %   {x | C*x >= 0}
     %
-    %   This sub-problem is encountered when either minConf or Cflash are
-    %   used to solve the tomographic reconstruction problem defined by
-    %   RecModel. Generally speaking, it is much easier to solve the dual
-    %   of the aforementioned problem. Therefore, we will solve the
-    %   following problem instead (dual):
+    %   This sub-problem is encountered when projections on the constraint 
+    %   set are required to solve the tomographic reconstruction problem 
+    %   defined by RecModel. Solving the dual comes to a bounded problem :
     %
-    %   min   1/2 || C'*z + \bar{x} ||^2
-    %     z   z >= 0
+    %   min     1/2 || C'*z + \bar{x} ||^2
+    %     z     z >= 0
     %
-    %   where z is a lagrange multiplier, C is the preconditionner used
-    %   in the reconstruction problem.
+    %   where z is a lagrange multiplier, C is the scaling matrix used in 
+    %   the reconstruction problem, and is much easier to solve than the
+    %   primal (original) projection problem :
+    %
+    %   min     1/2 || x - \bar{x} ||^2
+    %     x     C*x >= 0   
     %
     %   This model is only compatible with the structure of the tomographic
-    %   reconstruction algorithm made by Poly-LION. The preconditionner
+    %   reconstruction algorithm made by Poly-LION. The scaling matrix C
     %   should be a Precond object.
     
     
@@ -100,9 +102,12 @@ classdef ProjModel < model.LeastSquaresModel
             xProj = self.xbar + real(self.prec.Adjoint(zProj));
         end
         
-        function zProj = project(self, z)
+        function z = project(self, z)
             %% Projects { z | zProj >= 0 }
-            zProj = max(z, self.bL); % min(max(z, self.bL), self.bU)
+            keyboard;
+            z(self.jLow) = max(z(self.jLow), self.bL(self.jLow));
+            
+            z = max(z, self.bL);
         end
         
         %% The following functions are redefined from the parent class
