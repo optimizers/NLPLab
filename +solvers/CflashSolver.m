@@ -47,7 +47,7 @@ classdef CflashSolver < solvers.NlpSolver
         
         maxExtraIter;
         
-        eqProjFunc;
+        projectActSet;
         Jac;
         JacJact;
         krylOpts;
@@ -163,22 +163,22 @@ classdef CflashSolver < solvers.NlpSolver
                 
                 if strcmp(p.Results.method, 'lsqr')
                     import krylov.lsqr_spot;
-                    self.eqProjFunc = @(d, ind) self.callLsqr(d, ind);
+                    self.projectActSet = @(d, ind) self.callLsqr(d, ind);
                 elseif strcmp(p.Results.method, 'lsmr')
                     import krylov.lsmr_spot;
-                    self.eqProjFunc = @(d, ind) self.callLsmr(d, ind);
+                    self.projectActSet = @(d, ind) self.callLsmr(d, ind);
                 elseif strcmp(p.Results.method, 'minres')
                     % MinRes
                     import krylov.minres_spot;
-                    self.eqProjFunc = @(d, ind) self.callMinres(d, ind);
+                    self.projectActSet = @(d, ind) self.callMinres(d, ind);
                 else
                     % Default to PCG
-                    self.eqProjFunc = @(d, ind) self.callPcg(d, ind);
+                    self.projectActSet = @(d, ind) self.callPcg(d, ind);
                 end
             else
                 % Matrix is in double format, so we invert it using \
                 self.Jac = self.nlp.gcon([]);
-                self.eqProjFunc = @(d, ind) self.doMatInv(d, ind);
+                self.projectActSet = @(d, ind) self.doMatInv(d, ind);
             end
             
             self.stats.proj = struct;
@@ -371,6 +371,27 @@ classdef CflashSolver < solvers.NlpSolver
             self.nProj = self.nProj + 1;
         end
         
+        function xProj = projectMixed(self, x, fixed)
+            %%
+            xProj = self.nlp.projectMixed(x, fixed);
+            if ~self.nlp.solved
+                % Propagate throughout the program to exit
+                self.iStop = self.EXIT_PROJ_FAILURE;
+            end
+            
+            % This can be removed later
+            if isprop(self.nlp, 'projSolver')
+                solver = self.nlp.projSolver;
+                % Cumulative average of ||Pg|| & solv. time & total solv.
+                self.stats.proj.info = [(self.nProj * ...
+                    self.stats.proj.info(1:2) + [solver.pgNorm, ...
+                    solver.solveTime])/(self.nProj + 1), ...
+                    self.stats.proj.info(3) + solver.solveTime];
+            end
+            
+            self.nProj = self.nProj + 1;
+        end
+        
     end % public methods
     
     
@@ -533,9 +554,9 @@ classdef CflashSolver < solvers.NlpSolver
             self.logger.debug(sprintf('Leaving Cauchy, α = %7.1e', alph));
         end % cauchy
         
-        function s = prsrch(self, H, x, g, w)
+        function s = prsrch(self, H, x, g, w, fixed)
             %% PrSrch - Projected search
-            % s = prsrch(H, x, g, w) where
+            % s = prsrch(H, x, g, w, fixed) where
             % Inputs:
             %     H is an opSpot to compute matrix-vector
             %     products
@@ -589,7 +610,7 @@ classdef CflashSolver < solvers.NlpSolver
                 
                 % Calculate P[x + alph*w] - x and check the sufficient
                 % decrease condition.
-                s = self.gpstep(x, alph, w);
+                s = self.projectMixed(x + alph * w, fixed) - x;
                 self.logger.debug(sprintf('\t||s|| = %7.3e', norm(s)));
                 gts = g' * s;
                 if 0.5 * s'*H*s + gts <= self.mu0 * gts
@@ -609,7 +630,7 @@ classdef CflashSolver < solvers.NlpSolver
             end
             
             % Compute the final iterate and step.
-            s = self.gpstep(x, alph, w); % s = P[x + alph * w] - x
+            s = self.projectMixed(x + alph * w, fixed) - x;
         end % prsrch
         
         function [x, s] = spcg(self, H, x, g, delta, s)
@@ -666,16 +687,17 @@ classdef CflashSolver < solvers.NlpSolver
             for nFaces = 1 : self.nlp.n
                 
                 % Determine the free variables at the current minimizer.
-                fixed = ~self.getIndFree(x);
-                
+                [fixed, nFree] = self.getIndFree(x);
+                % getIndFree returns the free indices, fixed = ~ free
+                fixed = ~fixed;
                 % Exit if there are no free constraints
-                if ~any(~fixed)
+                if nFree == 0
                     break;
                 end
                 
                 % Hs & g must be such that (Cp)_i = 0 \forall i \in fixed
-                Hs = self.eqProjFunc(Hs, fixed);
-                gP = self.eqProjFunc(g, fixed);
+                Hs = self.projectActSet(Hs, fixed);
+                gP = self.projectActSet(g, fixed);
                 % Compute the grad of quad q = g + H*(x{k, j} - x_k)
                 gQuad = Hs + gP;
                 
@@ -691,24 +713,35 @@ classdef CflashSolver < solvers.NlpSolver
                 
                 % Use a projected search to obtain the next iterate.
                 % The projected search algorithm stores s[k] in w.
-                w = self.prsrch(H, x, gQuad, w);
+                w = self.prsrch(H, x, gQuad, w, fixed);
+                
+                zz = self.nlp.fcon(w);
+                wNorm = norm(zz(fixed));
                 
                 % Update the minimizer and the step.
                 % Note that s now contains x[k+1] - x[0].
                 x = x + w;
                 s = s + w;
                 
+                zz = self.nlp.fcon(x);
+                cxNorm = norm(zz(zz < 0));
+                
                 % Compute H*(x[k+1] - x[0]) and store in w.
                 Hs = H * s;
-                HsP = self.eqProjFunc(Hs, fixed);
+                HsP = self.projectActSet(Hs, fixed);
+                
+                qNorm = norm(HsP + gP);
+                fprintf(['\n\n# free = %d, ||Cw=0|| = %.2e, ||Cx<0|| =', ...
+                    ' %.2e\nqNorm = %.2e, tol = %.2e\n\n'], nFree, ...
+                    wNorm, cxNorm, qNorm, tol);
                 
                 % Convergence and termination test.
                 % We terminate if the preconditioned conjugate gradient
                 % method encounters a direction of negative curvature, or
                 % if the step is at the trust region bound.
-                if norm(HsP + gP) <= tol || infoTR == 2 || infoTR == 3 ...
+                if qNorm <= tol || infoTR == 2 || infoTR == 3 ...
                         || iters > self.maxIterCg || ...
-                        toc(self.solveTime) >= self.maxRT
+                        toc(self.solveTime) >= self.maxRT || self.iStop
                     self.logger.debug('Leaving SPCG');
                     break;
                 end
@@ -782,7 +815,7 @@ classdef CflashSolver < solvers.NlpSolver
             w = zeros(self.nlp.n, 1);
             % Initialize the residual r of grad q to -g.
             r = -g; % g is already projected
-            %             r = self.eqProjFunc(-g, fixed);
+            %             r = self.projectActSet(-g, fixed);
             % Initialize the direction p.
             p = r;
             % Initialize rho and the norms of r.
@@ -835,7 +868,7 @@ classdef CflashSolver < solvers.NlpSolver
                 
                 % Update w and the residuals r.
                 w = w + alph*p;
-                r = r - alph*self.eqProjFunc(q, fixed);
+                r = r - alph*self.projectActSet(q, fixed);
                 % Exit if the residual convergence test is satisfied.
                 rtr = r'*r;
                 rnorm = sqrt(rtr);
@@ -948,7 +981,7 @@ classdef CflashSolver < solvers.NlpSolver
             %% CallMinres
             % Solves the problem
             % min   1/2 || w - d||^2
-            %   w   sc (C*w)_i = 0, for i \not \in the working set
+            %   w   sc (C*w)_i = 0, for i \in fixed
             % See callPcg's documentation
             
             subC = self.Jac(fixed, :); % B * C
@@ -975,7 +1008,7 @@ classdef CflashSolver < solvers.NlpSolver
             %% CallLsqr
             % Solves the problem
             % min   1/2 || w - d||^2
-            %   w   sc (C*w)_i = 0, for i \not \in the working set
+            %   w   sc (C*w)_i = 0, for i \in fixed
             % See callPcg's documentation
             
             subC = self.Jac(fixed, :); % B * C
@@ -998,7 +1031,7 @@ classdef CflashSolver < solvers.NlpSolver
             %% CallLsmr
             % Solves the problem
             % min   1/2 || w - d||^2
-            %   w   sc (C*w)_i = 0, for i \not \in the working set
+            %   w   sc (C*w)_i = 0, for i \in fixed
             % See callPcg's documentation
             
             subC = self.Jac(fixed, :); % B * C
@@ -1021,7 +1054,7 @@ classdef CflashSolver < solvers.NlpSolver
             %% DoMatInv
             % Solves the problem
             % min   1/2 || w - d||^2
-            %   w   sc (C*w)_i = 0, for i \not \in the working set
+            %   w   sc (C*w)_i = 0, for i \in fixed
             % Matrix Inversion of B*C*C'*B'
             
             subC = self.Jac(fixed, :); % B * C

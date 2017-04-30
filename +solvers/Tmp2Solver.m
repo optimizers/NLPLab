@@ -310,7 +310,10 @@ classdef Tmp2Solver < solvers.NlpSolver
         function x = project(self, x)
             %% Project - project x on the bounds
             % Upper and lower bounds are defined in nlp model
-            x = min(max(x, self.nlp.bL), self.nlp.bU);
+            x(self.nlp.jLow) = max(x(self.nlp.jLow), ...
+                self.nlp.bL(self.nlp.jLow));
+            x(self.nlp.jUpp) = min(x(self.nlp.jUpp), ...
+                self.nlp.bU(self.nlp.jUpp));
         end
         
     end % public methods
@@ -322,9 +325,14 @@ classdef Tmp2Solver < solvers.NlpSolver
             %% Working - compute set of 'working' variables
             % true  = variable didn't reach its bound and can be improved
             
-            % Find binding set
-            working = ~((x == self.nlp.bL & g > 0) | ...
-                (x == self.nlp.bU & g < 0));
+            working = false(self.nlp.n, 1);
+            working(self.nlp.jLow) = ...
+                (x(self.nlp.jLow) == self.nlp.bL(self.nlp.jLow) ...
+                & g(self.nlp.jLow) > 0);
+            working(self.nlp.jUpp) = ...
+                (x(self.nlp.jUpp) == self.nlp.bU(self.nlp.jUpp) ...
+                & g(self.nlp.jUpp) < 0);
+            working = ~working;
         end
         
         function d = callPcg(self, g, H, working)
