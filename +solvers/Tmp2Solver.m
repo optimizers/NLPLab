@@ -2,12 +2,12 @@ classdef Tmp2Solver < solvers.NlpSolver
     %% Tmp2Solver - Calls the MinConf_TMP solver
     % A clean up of TmpSolver.
     %
-    % An object oriented framework based on the original minConf solver
+    % An object oriented solver based on the original minConf solver
     % available at: https://www.cs.ubc.ca/~schmidtm/Software/minConf.html
     %
     % Solves bounded non-linear optimization problems:
     %
-    %   min_x { f(x) : bL <= x <= bU
+    %   min_x f(x) s.t. bL <= x <= bU
     %
     % The solver has been modified to support a nlp model as primary
     % argument. Note that the function 'obj' has to be defined for the nlp
@@ -310,10 +310,7 @@ classdef Tmp2Solver < solvers.NlpSolver
         function x = project(self, x)
             %% Project - project x on the bounds
             % Upper and lower bounds are defined in nlp model
-            x(self.nlp.jLow) = max(x(self.nlp.jLow), ...
-                self.nlp.bL(self.nlp.jLow));
-            x(self.nlp.jUpp) = min(x(self.nlp.jUpp), ...
-                self.nlp.bU(self.nlp.jUpp));
+            x = min(max(x, self.nlp.bL), self.nlp.bU);
         end
         
     end % public methods
@@ -323,16 +320,9 @@ classdef Tmp2Solver < solvers.NlpSolver
         
         function working = working(self, x, g)
             %% Working - compute set of 'working' variables
-            % true  = variable didn't reach its bound and can be improved
-            
-            working = false(self.nlp.n, 1);
-            working(self.nlp.jLow) = ...
-                (x(self.nlp.jLow) == self.nlp.bL(self.nlp.jLow) ...
-                & g(self.nlp.jLow) > 0);
-            working(self.nlp.jUpp) = ...
-                (x(self.nlp.jUpp) == self.nlp.bU(self.nlp.jUpp) ...
-                & g(self.nlp.jUpp) < 0);
-            working = ~working;
+            % true  = variable didn't reach its bound and can be improved            
+            working = ~((x == self.nlp.bL & g > 0) | ...
+                (x == self.nlp.bU & g < 0));
         end
         
         function d = callPcg(self, g, H, working)
@@ -363,7 +353,6 @@ classdef Tmp2Solver < solvers.NlpSolver
             % are defined in the LeastSquaresModel that allow a correct
             % call to LSQR & LSMR. The user must provide A and A*x-b from
             % the objective function ||A*x - b||^2.
-            
             temp = -self.nlp.getResidual(x);
             d = krylov.lsqr_spot(self.nlp.A(:, working), temp, ...
                 self.krylOpts);
@@ -375,7 +364,6 @@ classdef Tmp2Solver < solvers.NlpSolver
             % are defined in the LeastSquaresModel that allow a correct
             % call to LSQR & LSMR. The user must provide A and A*x-b from
             % the objective function ||A*x - b||^2.
-            
             temp = -self.nlp.getResidual(x);
             d = krylov.lsmr_spot(self.nlp.A(:, working), temp, ...
                 self.krylOpts);

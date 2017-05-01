@@ -252,17 +252,9 @@ classdef BcflashSolver < solvers.NlpSolver
             %% Project
             % Project a vector onto the box defined by bL, bU.
             if nargin > 2
-                x(self.nlp.jLow(ind)) = max(x(self.nlp.jLow(ind)), ...
-                    self.nlp.bL(self.nlp.jLow(ind)));
-                x(self.nlp.jUpp(ind)) = min(x(self.nlp.jUpp(ind)), ...
-                    self.nlp.bU(self.nlp.jUpp(ind)));
-%                 x = min(self.nlp.bU(ind), max(x, self.nlp.bL(ind)));
+                x = min(self.nlp.bU(ind), max(x, self.nlp.bL(ind)));
             else
-                x(self.nlp.jLow) = max(x(self.nlp.jLow), ...
-                    self.nlp.bL(self.nlp.jLow));
-                x(self.nlp.jUpp) = min(x(self.nlp.jUpp), ...
-                    self.nlp.bU(self.nlp.jUpp));
-%                 x = min(self.nlp.bU, max(x, self.nlp.bL));
+                x = min(self.nlp.bU, max(x, self.nlp.bL));
             end
         end
         
