@@ -13,8 +13,10 @@ classdef BbSolver < solvers.NlpSolver
         suffDec;
         maxProj;
         bbFunc;
+        lsFunc;
         storedAlph;
         tau;
+        projLS;
         
         stats;
     end % private properties
@@ -59,7 +61,8 @@ classdef BbSolver < solvers.NlpSolver
             p.addParameter('suffDec', 1e-4);
             p.addParameter('maxProj', 1e5);
             p.addParameter('maxIterLS', 50); % Max iters for linesearch
-            p.addParameter('bbType', 'BB1');
+            p.addParameter('bbType', 'bb1');
+            p.addParameter('projLS', false);
             
             p.parse(varargin{:});
             
@@ -69,31 +72,47 @@ classdef BbSolver < solvers.NlpSolver
             self.maxIterLS = p.Results.maxIterLS;
             self.suffDec = p.Results.suffDec;
             self.maxProj = p.Results.maxProj;
+            self.projLS = p.Results.projLS;
             self.fid = p.Results.fid;
             
             % Initialize non-monotone line search objective function array
             self.storedObjFunc = -inf(self.memory, 1);
             
             import utils.PrintInfo;
-            import linesearch.nmSpectralArmijo;
+            
+            if self.projLS
+                % Projected line search, must not project d first
+                % d = -alph * g
+                import linesearch.nmProjSpectArmijo;
+                self.lsFunc = @(x, f, g, alph) ...
+                    linesearch.nmProjSpectArmijo( ...
+                    self, x, f, g, -alph * g);
+            else
+                % Regular line search, must project d first
+                % d = P[x - alph * g] - x
+                import linesearch.nmSpectralArmijo;
+                self.lsFunc = @(x, f, g, alph) ...
+                    linesearch.nmSpectralArmijo( ...
+                    self, x, f, g, self.project(x - alph * g) - x);
+            end
             
             switch p.Results.bbType
-                case 'BB1'
+                case 'bb1'
                     self.bbFunc = @(xOld, x, gOld, g) ...
                         self.bbStep(xOld, x, gOld, g);
-                case 'BB2'
+                case 'bb2'
                     self.bbFunc = @(xOld, x, gOld, g) ...
                         self.bbStep2(xOld, x, gOld, g);
-                case 'ABB'
+                case 'abb'
                     self.bbFunc = @(xOld, x, gOld, g) ...
                         self.abb(xOld, x, gOld, g);
                     self.tau = 0.5;
-                case 'ABBmin1'
+                case 'abbmin1'
                     self.bbFunc = @(xOld, x, gOld, g) ...
                         self.abbMin1(xOld, x, gOld, g);
                     self.storedAlph = inf(self.memory, 1);
                     self.tau = 0.15;
-                case 'ABBmin2'
+                case 'abbss'
                     self.bbFunc = @(xOld, x, gOld, g) ...
                         self.abbMin2(xOld, x, gOld, g);
                     self.storedAlph = inf(self.memory, 1);
@@ -179,9 +198,6 @@ classdef BbSolver < solvers.NlpSolver
                     break;
                 end
                 
-                % Descent direction
-                d = self.project(x - alph * g) - x;
-                
                 % Check function progression
                 fOld = f;
                 % Storing older values to compute BB step length
@@ -193,8 +209,7 @@ classdef BbSolver < solvers.NlpSolver
                     mod(self.iter - 1, self.memory) + 1) = f;
                 
                 % Perform a non-monotone Armijo line search
-                [x, f, failed, t] = linesearch.nmSpectralArmijo(self, ...
-                    x, f, g, d);
+                [x, f, failed, t] = self.lsFunc(x, f, g, alph);
                 
                 % Evaluate gradient at new x
                 g = self.nlp.gobj(x);
@@ -233,11 +248,6 @@ classdef BbSolver < solvers.NlpSolver
             fprintf(self.fid, varargin{:});
         end
         
-    end % public methods
-    
-    
-    methods (Access = private)
-        
         function z = project(self, x)
             %% Project - projecting x on the constraint set
             z = self.nlp.project(x);
@@ -258,6 +268,11 @@ classdef BbSolver < solvers.NlpSolver
             
             self.nProj = self.nProj + 1;
         end
+        
+    end % public methods
+    
+    
+    methods (Access = private)
         
         function alph = bbStep(self, xOld, x, gOld, g)
             %% BBStepLength - Compute Barzilai-Borwein step length

@@ -104,9 +104,6 @@ classdef ProjModel < model.LeastSquaresModel
         
         function z = project(self, z)
             %% Projects { z | zProj >= 0 }
-            keyboard;
-            z(self.jLow) = max(z(self.jLow), self.bL(self.jLow));
-            
             z = max(z, self.bL);
         end
         

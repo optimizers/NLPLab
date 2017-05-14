@@ -715,26 +715,26 @@ classdef CflashSolver < solvers.NlpSolver
                 % The projected search algorithm stores s[k] in w.
                 w = self.prsrch(H, x, gQuad, w, fixed);
                 
-                zz = self.nlp.fcon(w);
-                wNorm = norm(zz(fixed));
+%                 zz = self.nlp.fcon(w);
+%                 wNorm = norm(zz(fixed));
                 
                 % Update the minimizer and the step.
                 % Note that s now contains x[k+1] - x[0].
                 x = x + w;
                 s = s + w;
                 
-                zz = self.nlp.fcon(x);
-                cxNorm = norm(zz(zz < 0));
+%                 zz = self.nlp.fcon(x);
+%                 cxNorm = norm(zz(zz < 0));
                 
                 % Compute H*(x[k+1] - x[0]) and store in w.
                 Hs = H * s;
                 HsP = self.projectActSet(Hs, fixed);
                 
                 qNorm = norm(HsP + gP);
-                fprintf(['\n\n\t\t# free = %d, ||Cw=0|| = %.2e,', ...
-                    ' ||Cx<0|| = %.2e\n\t\tqNorm = %.2e, tol =', ...
-                    ' %.2e\n\n'], nFree, wNorm, cxNorm, qNorm, tol);
-                
+%                 fprintf(['\n\n\t\t# free = %d, ||Cw=0|| = %.2e,', ...
+%                     ' ||Cx<0|| = %.2e\n\t\tqNorm = %.2e, tol =', ...
+%                     ' %.2e\n\n'], nFree, wNorm, cxNorm, qNorm, tol);
+%                 
                 % Convergence and termination test.
                 % We terminate if the preconditioned conjugate gradient
                 % method encounters a direction of negative curvature, or
