@@ -90,10 +90,10 @@ for problem = problems
 end
 
 [~, pname, ~] = fileparts(problemsFile);
-save([pname, '-cflash-vs-bcflash'], 'data');
+save([pname, '-cflash-vs-bcflash-new'], 'data');
 
 %% Build the performance profiles
 import utils.perf;
 perfOpts = struct('display', true, 'saveFolder', ...
-    './cflash-vs-bcflash/', 'prefix', pname, 'logPlot', true);
+    './cflash-vs-bcflash-new/', 'prefix', pname, 'logPlot', true);
 utils.perf(data.pMat, {data.solverNames, data.infoHeader}, perfOpts);

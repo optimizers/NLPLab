@@ -38,8 +38,6 @@ classdef CflashSolver < solvers.NlpSolver
         fMin;
         fid; % File ID of where to direct log output
         
-        % Initialize cauchy with Barzilai-Borwein step length
-        useBb;
         % Backtracking parameters
         backtracking;
         suffDec;
@@ -47,7 +45,7 @@ classdef CflashSolver < solvers.NlpSolver
         
         maxExtraIter;
         
-        projectActSet;
+        projectActFace;
         Jac;
         JacJact;
         krylOpts;
@@ -108,12 +106,11 @@ classdef CflashSolver < solvers.NlpSolver
             p.addParameter('mu0', 0.01);
             p.addParameter('fid', 1);
             p.addParameter('maxProj', 1e5);
-            p.addParameter('useBb', false);
             p.addParameter('eqTol', 1e-12);
             p.addParameter('backtracking', false);
             p.addParameter('maxIterLS', 10);
             p.addParameter('suffDec', 1e-4);
-            p.addParameter('maxExtraIter', 5);
+            p.addParameter('maxExtraIter', 15);
             p.addParameter('method', 'pcg');
             
             p.parse(varargin{:});
@@ -128,7 +125,6 @@ classdef CflashSolver < solvers.NlpSolver
             self.fid = p.Results.fid;
             self.eqTol = p.Results.eqTol;
             self.maxProj = p.Results.maxProj;
-            self.useBb = p.Results.useBb;
             self.backtracking = p.Results.backtracking;
             self.suffDec = p.Results.suffDec;
             self.maxIterLS = p.Results.maxIterLS;
@@ -163,22 +159,22 @@ classdef CflashSolver < solvers.NlpSolver
                 
                 if strcmp(p.Results.method, 'lsqr')
                     import krylov.lsqr_spot;
-                    self.projectActSet = @(d, ind) self.callLsqr(d, ind);
+                    self.projectActFace = @(d, ind) self.callLsqr(d, ind);
                 elseif strcmp(p.Results.method, 'lsmr')
                     import krylov.lsmr_spot;
-                    self.projectActSet = @(d, ind) self.callLsmr(d, ind);
+                    self.projectActFace = @(d, ind) self.callLsmr(d, ind);
                 elseif strcmp(p.Results.method, 'minres')
                     % MinRes
                     import krylov.minres_spot;
-                    self.projectActSet = @(d, ind) self.callMinres(d, ind);
+                    self.projectActFace = @(d, ind) self.callMinres(d, ind);
                 else
                     % Default to PCG
-                    self.projectActSet = @(d, ind) self.callPcg(d, ind);
+                    self.projectActFace = @(d, ind) self.callPcg(d, ind);
                 end
             else
                 % Matrix is in double format, so we invert it using \
                 self.Jac = self.nlp.gcon([]);
-                self.projectActSet = @(d, ind) self.doMatInv(d, ind);
+                self.projectActFace = @(d, ind) self.doMatInv(d, ind);
             end
             
             self.stats.proj = struct;
@@ -238,6 +234,7 @@ classdef CflashSolver < solvers.NlpSolver
             
             %% Main loop
             while true
+                
                 % Check stopping conditions
                 [~, nFree] = self.getIndFree(x);
                 pgNorm = norm(self.gpstep(x, -1, g));
@@ -306,17 +303,8 @@ classdef CflashSolver < solvers.NlpSolver
                         % Successful step
                         status = '';
                         self.nSuccessIter = self.nSuccessIter + 1;
-                        if self.useBb % Init cauchy with BB step length
-                            % Can only use BB step if iteration successful
-                            gOld = g;
-                            % Update the gradient value
-                            g = self.nlp.gobj(x);
-                            % Update initial alphc used in Cauchy
-                            alphc = self.bbStepLength(xc, x, gOld, g);
-                        else
-                            % Update the gradient value
-                            g = self.nlp.gobj(x);
-                        end
+                        % Update the gradient value
+                        g = self.nlp.gobj(x);
                         % Break loop if step is accepted
                         break;
                     elseif self.backtracking && ~backtrackAttempted
@@ -396,36 +384,6 @@ classdef CflashSolver < solvers.NlpSolver
     
     
     methods (Access = private)
-        
-        function alph = bbStepLength(self, xOld, x, gOld, g)
-            %% BBStepLength - Compute Barzilai-Borwein step length
-            % alph_BB = (s' * s) / (s' * y)
-            s = x - xOld;
-            % Denominator of Barzilai-Borwein step length
-            betaBB = s' * (g - gOld);
-            
-            % Find the minimal and maximal break-point on x - alph*g.
-            [~, alphMin, alphMax] = self.breakpt(x, -g);
-            % Safeguard
-            if isinf(alphMax)
-                alphMax = 1e3;
-            end
-            if isinf(alphMin)
-                alphMin = 1e-3;
-            end
-            
-            if betaBB < 0
-                % Fall back to maximal step length
-                alph = alphMax;
-            else
-                % Compute Barzilai-Borwein step length
-                % y = g - gOld
-                % alph_BB = (s' * s) / (s' * y)
-                % Assert alph \in [alph_min, alph_max]
-                alph = min(alphMax, ...
-                    max(alphMin, (s' * s) / betaBB));
-            end
-        end % bbsteplength
         
         function delta = updateDelta(self, f, fc, g, s, actRed, preRed, ...
                 delta)
@@ -680,8 +638,8 @@ classdef CflashSolver < solvers.NlpSolver
             x = x + s;
             % Evaluate H * (x_{k, j} - x_k)
             Hs = H * s;
-
-            % There are at most n iterations because at each iter at least 
+            
+            % There are at most n iterations because at each iter at least
             % one variable becomes active.
             iters = 1;
             for nFaces = 1 : self.nlp.n
@@ -696,8 +654,8 @@ classdef CflashSolver < solvers.NlpSolver
                 end
                 
                 % Hs & g must be such that (Cp)_i = 0 \forall i \in fixed
-                Hs = self.projectActSet(Hs, fixed);
-                gP = self.projectActSet(g, fixed);
+                Hs = self.projectActFace(Hs, fixed);
+                gP = self.projectActFace(g, fixed);
                 % Compute the grad of quad q = g + H*(x{k, j} - x_k)
                 gQuad = Hs + gP;
                 
@@ -715,31 +673,20 @@ classdef CflashSolver < solvers.NlpSolver
                 % The projected search algorithm stores s[k] in w.
                 w = self.prsrch(H, x, gQuad, w, fixed);
                 
-%                 zz = self.nlp.fcon(w);
-%                 wNorm = norm(zz(fixed));
-                
                 % Update the minimizer and the step.
                 % Note that s now contains x[k+1] - x[0].
                 x = x + w;
                 s = s + w;
                 
-%                 zz = self.nlp.fcon(x);
-%                 cxNorm = norm(zz(zz < 0));
-                
                 % Compute H*(x[k+1] - x[0]) and store in w.
                 Hs = H * s;
-                HsP = self.projectActSet(Hs, fixed);
+                HsP = self.projectActFace(Hs, fixed);
                 
-                qNorm = norm(HsP + gP);
-%                 fprintf(['\n\n\t\t# free = %d, ||Cw=0|| = %.2e,', ...
-%                     ' ||Cx<0|| = %.2e\n\t\tqNorm = %.2e, tol =', ...
-%                     ' %.2e\n\n'], nFree, wNorm, cxNorm, qNorm, tol);
-%                 
                 % Convergence and termination test.
                 % We terminate if the preconditioned conjugate gradient
                 % method encounters a direction of negative curvature, or
                 % if the step is at the trust region bound.
-                if qNorm <= tol || infoTR == 2 || infoTR == 3 ...
+                if norm(HsP + gP) <= tol || infoTR == 2 || infoTR == 3 ...
                         || iters > self.maxIterCg || ...
                         toc(self.solveTime) >= self.maxRT || self.iStop
                     self.logger.debug('Leaving SPCG');
@@ -815,7 +762,7 @@ classdef CflashSolver < solvers.NlpSolver
             w = zeros(self.nlp.n, 1);
             % Initialize the residual r of grad q to -g.
             r = -g; % g is already projected
-            %             r = self.projectActSet(-g, fixed);
+            %             r = self.projectActFace(-g, fixed);
             % Initialize the direction p.
             p = r;
             % Initialize rho and the norms of r.
@@ -868,7 +815,7 @@ classdef CflashSolver < solvers.NlpSolver
                 
                 % Update w and the residuals r.
                 w = w + alph*p;
-                r = r - alph*self.projectActSet(q, fixed);
+                r = r - alph*self.projectActFace(q, fixed);
                 % Exit if the residual convergence test is satisfied.
                 rtr = r'*r;
                 rnorm = sqrt(rtr);
@@ -915,6 +862,9 @@ classdef CflashSolver < solvers.NlpSolver
             % Upper constraint intersections: cU - C*x > 0 & C*w > 0
             inc = (self.nlp.cU - Cx >= appZero) & (Cw >= appZero);
             
+            dec = dec & self.nlp.iLow;
+            inc = inc & self.nlp.iUpp;
+            
             nBrpt = sum(dec | inc);
             
             % Quick exit if no breakpoints
@@ -927,8 +877,8 @@ classdef CflashSolver < solvers.NlpSolver
             brptDec = (self.nlp.cL(dec) - Cx(dec)) ./ Cw(dec);
             brptInc = (self.nlp.cU(inc) - Cx(inc)) ./ Cw(inc);
             
-            brptMin = min([brptInc; brptDec; inf]);
-            brptMax = max([brptInc; brptDec; -inf]);
+            brptMin = min([brptInc; brptDec]);
+            brptMax = max([brptInc; brptDec]);
         end % breakpt
         
         function appZero = getAppZero(self, x)

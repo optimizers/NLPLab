@@ -29,5 +29,9 @@ classdef BoundProjAmplModel < model.AmplModel & model.BoundProj
            nrmJac = 1; 
         end
         
+        function x = projectMixed(self, x, fixed)
+            x(~fixed) = self.projectSel(x, ~fixed);
+        end
+        
     end
 end
