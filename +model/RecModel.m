@@ -266,7 +266,6 @@ classdef RecModel < model.NlpModel
                 z = self.prec.Adjoint(z);
             end
             z = real(z);
-            self.ncalls_hvp = self.ncalls_hvp + 1;
         end
         
     end

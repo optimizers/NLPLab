@@ -12,14 +12,11 @@ classdef BcflashSolver < solvers.NlpSolver
         fMin;
         fid; % File ID of where to direct log output
         
-        % Initialize cauchy with Barzilai-Borwein step length
-        useBb;
         % Backtracking parameters
         backtracking;
         suffDec;
         maxIterLS;
-        
-        clock = struct;
+        maxExtraIter
     end
     
     properties (Hidden = true, Constant)
@@ -55,9 +52,9 @@ classdef BcflashSolver < solvers.NlpSolver
             p.addParameter('fMin', -1e32);
             p.addParameter('mu0', 0.01);
             p.addParameter('fid', 1);
-            p.addParameter('useBb', true);
             p.addParameter('backtracking', true);
             p.addParameter('maxIterLS', 10);
+            p.addParameter('maxExtraIter', 50);
             p.addParameter('suffDec', 1e-4);
             
             p.parse(varargin{:});
@@ -70,9 +67,9 @@ classdef BcflashSolver < solvers.NlpSolver
             self.fMin = p.Results.fMin;
             self.mu0 = p.Results.mu0;
             self.fid = p.Results.fid;
-            self.useBb = p.Results.useBb;
             self.backtracking = p.Results.backtracking;
             self.suffDec = p.Results.suffDec;
+            self.maxExtraIter = p.Results.maxExtraIter;
             self.maxIterLS = p.Results.maxIterLS;
             
             if self.backtracking
@@ -91,17 +88,6 @@ classdef BcflashSolver < solvers.NlpSolver
             self.iStop = self.EXIT_NONE;
             self.nSuccessIter = 0;
             self.nlp.resetCounters();
-            
-            
-            %%%
-            self.clock.cauchyInterp = 0;
-            self.clock.cauchyExtrap = 0;
-            self.clock.cauchy = 0;
-            self.clock.spcg = 0;
-            self.clock.spcgTrpcg = 0;
-            self.clock.spcgPrsrch = 0;
-            self.clock.spcgPrsrchInterp = 0;
-            %%%
             
             printObj = utils.PrintInfo('bcflash');
             
@@ -176,14 +162,10 @@ classdef BcflashSolver < solvers.NlpSolver
                 H = self.nlp.hobj(x);
                 
                 % Cauchy step
-                t = tic;
                 [alphc, s] = self.cauchy(H, x, g, delta, alphc);
-                self.clock.cauchy = self.clock.cauchy + toc(t);
                 
                 % Projected Newton step
-                t = tic;
                 [x, s] = self.spcg(H, x, g, delta, s);
-                self.clock.spcg = self.clock.spcg + toc(t);
                 
                 % Compute the objective at this new point
                 f = self.nlp.fobj(x);
@@ -204,17 +186,8 @@ classdef BcflashSolver < solvers.NlpSolver
                         % Successful step
                         status = '';
                         self.nSuccessIter = self.nSuccessIter + 1;
-                        if self.useBb % Init cauchy with BB step length
-                            % Can only use BB step if iteration successful
-                            gOld = g;
-                            % Update the gradient value
-                            g = self.nlp.gobj(x);
-                            % Update initial alphc used in Cauchy
-                            alphc = self.bbStepLength(xc, x, gOld, g);
-                        else
-                            % Update the gradient value
-                            g = self.nlp.gobj(x);
-                        end
+                        % Update the gradient value
+                        g = self.nlp.gobj(x);
                         % Break loop if step is accepted
                         break;
                     elseif self.backtracking && ~backtrackAttempted
@@ -262,36 +235,6 @@ classdef BcflashSolver < solvers.NlpSolver
     
     
     methods (Access = private)
-        
-        function alph = bbStepLength(self, xOld, x, gOld, g)
-            %% BBStepLength - Compute Barzilai-Borwein step length
-            % alph_BB = (s' * s) / (s' * y)
-            s = x - xOld;
-            % Denominator of Barzilai-Borwein step length
-            betaBB = s' * (g - gOld);
-            
-            % Find the minimal and maximal break-point on x - alph*g.
-            [~, alphMin, alphMax] = self.breakpt(x, -g);
-            % Safeguard
-            if isinf(alphMax)
-                alphMax = 1e3;
-            end
-            if isinf(alphMin)
-                alphMin = 1e-3;
-            end
-            
-            if betaBB < 0
-                % Fall back to maximal step length
-                alph = alphMax;
-            else
-                % Compute Barzilai-Borwein step length
-                % y = g - gOld
-                % alph_BB = (s' * s) / (s' * y)
-                % Assert alph \in [alph_min, alph_max]
-                alph = min(alphMax, ...
-                    max(alphMin, (s' * s) / betaBB));
-            end
-        end % bbsteplength
         
         function delta = updateDelta(self, f, fc, g, s, actRed, preRed, ...
                 delta)
@@ -366,7 +309,6 @@ classdef BcflashSolver < solvers.NlpSolver
             
             % Either interpolate or extrapolate to find a successful step.
             if interp
-                t = tic;
                 % Reduce alph until a successful step is found.
                 while (toc(self.solveTime) < self.maxRT)
                     % This is a crude interpolation procedure that
@@ -380,13 +322,13 @@ classdef BcflashSolver < solvers.NlpSolver
                         end
                     end
                 end
-                self.clock.cauchyInterp = self.clock.cauchyInterp + toc(t);
             else
-                t = tic;
                 % Increase alph until a successful step is found.
                 alphs = alph;
+                iter = 1;
                 while (alph <= brptMax) && ...
-                        (toc(self.solveTime) < self.maxRT)
+                        (toc(self.solveTime) < self.maxRT) && ...
+                        iter <= self.maxExtraIter
                     % This is a crude extrapolation procedure that
                     % will be replaced in future versions of the code.
                     alph = extrapf * alph;
@@ -400,11 +342,11 @@ classdef BcflashSolver < solvers.NlpSolver
                     else
                         break
                     end
+                    iter = iter + 1;
                 end
                 % Recover the last successful step.
                 alph = alphs;
                 s = self.gpstep(x, -alph, g);
-                self.clock.cauchyExtrap = self.clock.cauchyExtrap + toc(t);
             end
             
         end % cauchy
@@ -458,7 +400,6 @@ classdef BcflashSolver < solvers.NlpSolver
             
             % Reduce alph until the sufficient decrease condition is
             % satisfied or x + alph*w is feasible.
-            t = tic;
             while (alph > brptMin) && (toc(self.solveTime) < self.maxRT)
                 % Calculate P[x + alph*w] - x and check the sufficient
                 % decrease condition.
@@ -471,7 +412,6 @@ classdef BcflashSolver < solvers.NlpSolver
                 % will be replaced in future versions of the code.
                 alph = interpf * alph;
             end
-            self.clock.spcgPrsrchInterp = self.clock.spcgPrsrchInterp + toc(t);
             
             % Force at least one more constraint to be added to the active
             % set if alph < brptMin and the full step is not successful.
@@ -559,18 +499,14 @@ classdef BcflashSolver < solvers.NlpSolver
                 
                 Hfree = H(indFree, indFree);
                 
-                t = tic;
                 [w, iterTR, infoTR] = solvers.BcflashSolver.trpcg( ...
                     Hfree, gQuad, delta, tol, self.maxIterCg, s(indFree));
-                self.clock.spcgTrpcg = self.clock.spcgTrpcg + toc(t);
                 iters = iters + iterTR;
                 
                 % Use a projected search to obtain the next iterate.
                 % The projected search algorithm stores s[k] in w.
-                t = tic;
                 w = self.prsrch(Hfree, x(indFree), gQuad, w, ...
                     indFree);
-                self.clock.spcgPrsrch = self.clock.spcgPrsrch + toc(t);
                 
                 % Update the minimizer and the step.
                 % Note that s now contains x[k+1] - x[0].
@@ -625,13 +561,20 @@ classdef BcflashSolver < solvers.NlpSolver
             if nargin > 3
                 bU = self.nlp.bU(ind);
                 bL = self.nlp.bL(ind);
+                jUpp = self.nlp.jUpp(ind);
+                jLow = self.nlp.jLow(ind);
             else
                 bU = self.nlp.bU;
                 bL = self.nlp.bL;
+                jUpp = self.nlp.jUpp;
+                jLow = self.nlp.jLow;
             end
             
             inc = x < bU & w > 0;     % upper bound intersections
             dec = x > bL & w < 0;     % lower bound intersections
+            
+            inc = inc & jUpp;
+            dec = dec & jLow;
             
             nBrpt = sum(inc | dec);   % number of breakpoints
             
@@ -645,8 +588,8 @@ classdef BcflashSolver < solvers.NlpSolver
             brptInc = (bU(inc) - x(inc)) ./ w(inc);
             brptDec = (bL(dec) - x(dec)) ./ w(dec);
             
-            brptMin = min([brptInc; brptDec; inf]);
-            brptMax = max([brptInc; brptDec; -inf]);
+            brptMin = min([brptInc; brptDec]);
+            brptMax = max([brptInc; brptDec]);
         end % breakpt
         
     end % private methods
