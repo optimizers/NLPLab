@@ -17,8 +17,7 @@ classdef BbSolver < solvers.NlpSolver
         storedAlph;
         tau;
         projLS;
-        
-        stats;
+
     end % private properties
     
     properties (Hidden = true, Constant)
@@ -122,10 +121,6 @@ classdef BbSolver < solvers.NlpSolver
                     self.bbFunc = @(xOld, x, gOld, g) ...
                         self.bbStep(xOld, x, gOld, g);
             end
-            self.stats.proj = struct;
-            self.stats.proj.info = [0, 0, 0];
-            self.stats.proj.infoHeader = {'avg pgNorm', ...
-                'avg solveTime', 'total solveTime'};
         end % constructor
         
         function self = solve(self)
@@ -143,6 +138,7 @@ classdef BbSolver < solvers.NlpSolver
             x = self.project(self.nlp.x0);
             % Evaluate initial point & derivative
             [f, g] = self.nlp.obj(x);
+            pgnrm = norm(self.project(x - g) - x);
             
             fOld = inf;
             
@@ -250,22 +246,11 @@ classdef BbSolver < solvers.NlpSolver
         
         function z = project(self, x)
             %% Project - projecting x on the constraint set
-            z = self.nlp.project(x);
-            if ~self.nlp.solved
+            [z, solved] = self.nlp.project(x);
+            if ~solved
                 % Propagate throughout the program to exit
                 self.iStop = self.EXIT_PROJ_FAILURE;
             end
-            
-            % This can be removed later
-            if isprop(self.nlp, 'projSolver')
-                solver = self.nlp.projSolver;
-                % Cumulative average of ||Pg|| & solv. time & total solv.
-                self.stats.proj.info = [(self.nProj * ...
-                    self.stats.proj.info(1:2) + [solver.pgNorm, ...
-                    solver.solveTime])/(self.nProj + 1), ...
-                    self.stats.proj.info(3) + solver.solveTime];
-            end
-            
             self.nProj = self.nProj + 1;
         end
         

@@ -192,7 +192,7 @@ beta1 = b'*y;
 %  If b = 0 exactly, stop with x = 0.
 
 if beta1< 0, istop = 9;  done = true; end
-if beta1==0,             done = true; end
+if beta1==0, istop = 1;  done = true; end
 
 if beta1> 0
     beta1  = sqrt(beta1);       % Normalize y to get v1 later.
@@ -383,7 +383,7 @@ if ~done                              % k = itn = 1 first time through
         if Acond  <= 1e-2/eps , prnt = true; end
         if istop  ~=  0       , prnt = true; end
         
-        if show & prnt
+        if show && prnt
             if mod(itn,10)==0, disp(' '); end
             str1 = sprintf('%6g %12.5e %10.3e', itn,x(1),test1);
             str2 = sprintf(' %10.3e',           test2);
@@ -392,13 +392,13 @@ if ~done                              % k = itn = 1 first time through
             str  = [str1 str2 str3 str4];
             fprintf('\n %s', str)
             
-            debug = false;  % true;
-            if debug   % Print true Arnorm.
-                vv = b - A * x  + shift*x;    % vv = b - (A - shift*I)*x
-                ww =     A * vv - shift*vv;   % ww = (A - shift*I)*vv = "Ar"
-                trueArnorm = norm(ww);
-                fprintf('\n Arnorm = %12.4e   True ||Ar|| = %12.4e', Arnorm,trueArnorm)
-            end
+%             debug = false;  % true;
+%             if debug   % Print true Arnorm.
+%                 vv = b - A * x  + shift*x;    % vv = b - (A - shift*I)*x
+%                 ww =     A * vv - shift*vv;   % ww = (A - shift*I)*vv = "Ar"
+%                 trueArnorm = norm(ww);
+%                 fprintf('\n Arnorm = %12.4e   True ||Ar|| = %12.4e', Arnorm,trueArnorm)
+%             end
         end % show & prnt
         
         if istop ~= 0, break; end

@@ -25,17 +25,19 @@ classdef RecModel < model.NlpModel
         crit; % Contains terms representing the objective function
         prec; % The preconditionner used, identity = none
         sino; % The sinogram of the problem
-        geos; % The geometry that is used
-        Jac; % opSpot for the Jacobian (constant, linear constraint)
-        JacJact; % opSpot for Jacobian times the transpose of the Jacobian
         objSize; % number of variables
+        
+        nEvalP; % Counts the number of products with P
+        nEvalC; % Counts the number of products with C
+        
+        Jac; % opSpot of the Jacobian
     end
     
     
     %% Public methods
     methods (Access = public)
         
-        function self = RecModel(crit, prec, sino, geos, mu0, name)
+        function self = RecModel(crit, prec, sino, geos, varargin)
             %% Constructor
             % Inputs:
             %   - crit: Critere object from the Poly-LION repository
@@ -45,6 +47,17 @@ classdef RecModel < model.NlpModel
             %   - mu0: (optional) initial vector for the reconstruction
             %   problem
             %   - name: (optional) name of the nlp model
+            
+            % Gathering optinal arguments and setting default values
+            p = inputParser;
+            p.addParameter('mu0', []);
+            p.addParameter('name', '');
+
+            % Parsing input arguments
+            p.parse(varargin{:});
+            % Setting values
+            mu0 = p.Results.mu0;
+            name = p.Results.name;
             
             % Checking the arguments
             if ~isa(crit, 'Critere')
@@ -66,39 +79,32 @@ classdef RecModel < model.NlpModel
             end
             if nAdeq ~= 1
                 error(['There should be one Adequation term in the', ...
-                    'critobject']);
-            end
-            
-            % Getting object size depending on coordinates type
-            if isa(geos, 'GeoS_Cart')
-                objSiz = geos.Rows * geos.Columns * geos.Slices;
-            else % Has to be GeoS_Pol
-                objSiz = geos.Rhos * geos.Thetas * geos.Slices;
+                    'crit object']);
             end
             
             % In case of missing/empty arg or size mismatch
             if isempty(mu0)
-                mu0 = spalloc(objSiz, 1, objSiz);
-            elseif length(mu0(:)) ~= objSiz
+                mu0 = zeros(geos.nVoxels, 1);
+            elseif length(mu0(:)) ~= geos.nVoxels
                 error(['Initial value vector''s size doesn''t match', ...
                     'the object'])
             end
             
             % Converting to the preconditionned variable
             % mu = Cx <=> x = C^-1 mu
-            x0 = prec.Inverse(full(mu0));
+            x0 = prec.Inverse(mu0);
             
             % Bounds of the problem. cU & cL represent the bounds on the
             % constraints and bU & bL represent the bounds on the
             % variables. Equalities are assumed to be the cases where
             % cU_i = cL_i.
-            % Cx >= 0 is the only constraint
-            cU = inf(objSiz, 1);
-            cL = zeros(objSiz, 1);
-            bL = -inf(objSiz, 1);
-            bU = inf(objSiz, 1);
+            % Cx >= 0 is the only constraint. C is symmetric.
+            cU = inf(geos.nVoxels, 1);
+            cL = zeros(geos.nVoxels, 1);
+            bL = -inf(geos.nVoxels, 1);
+            bU = inf(geos.nVoxels, 1);
             
-            % Calling the NlpModel superclass (required for PDCOO & Cflash)
+            % Calling the NlpModel superclass
             self = self@model.NlpModel(name, x0, cL, cU, bL, bU);
             
             % Constraints are linear
@@ -108,20 +114,17 @@ classdef RecModel < model.NlpModel
             self.crit = crit;
             self.prec = prec;
             self.sino = sino;
-            self.geos = geos;
             
-            self.objSize = objSiz;
+            % Setting objSize
+            self.objSize = geos.nVoxels;
+            % Setting counters
+            self.nEvalP = 0;
+            self.nEvalC = 0;
             
-            % Some functions require Spot operators because only the
-            % matrix-product is available.
+            %% Setting opSpots to help with the projections
+            self.Jac = opFunction(self.objSize, self.objSize, ...
+                @(x, mode) self.precMult(x, mode));
             
-            % opSpot to Jacobian of constraints
-            self.Jac = opFunction(self.m, self.n, ...
-                @(z, mode) self.precMult(z, mode));
-            self.JacJact = opFunction(self.m, self.m, ...
-                @(z, mode) real(self.prec.AdjointDirect(z)));
-            self.JacJact = opFunction(self.m, self.m, ...
-                @(z, mode) real(self.prec.AdjointDirect(z)));
         end
         
         % Override the default NlpModel methods
@@ -159,39 +162,42 @@ classdef RecModel < model.NlpModel
             % The purpose of this method is to reduce the amount of
             % computations required by reusing part of the computations
             % already made.
-            x = real(x);
             fObj = 0;
             grad = zeros(size(x));
+            x = self.Jac * x; % x = C * x
             for i = 1 : self.crit.nElemts
                 vals = self.crit.J{i}.objGrad(x, reshape( ...
-                    self.sino.Scans{1}, [], 1), [], self.prec);
+                    self.sino.Scans{1}, [], 1), []);
                 fObj = fObj + vals.fObj;
                 grad = grad + vals.grad;
             end
             fObj = real(fObj);
-            grad = real(grad);
+            grad = real(self.Jac' * grad); % grad = C' * grad
+            self.nEvalP = self.nEvalP + 2;
         end
         
         function fObj = fobj_local(self, x)
             %% Computes the value of the objective function
-            x = real(x);
             fObj = 0;
+            x = self.Jac * x; % x = C * x
             for i = 1 : self.crit.nElemts
                 fObj = fObj + self.crit.J{i}.objFunc(x, reshape( ...
-                    self.sino.Scans{1}, [], 1), [], self.prec);
+                    self.sino.Scans{1}, [], 1), []);
             end
             fObj = real(fObj);
+            self.nEvalP = self.nEvalP + 1;
         end
         
         function grad = gobj_local(self, x)
             %% Computes the value of the gradient of the obj. func.
-            x = real(x);
             grad = zeros(size(x));
+            x = self.Jac * x; % x = C * x
             for i = 1 : self.crit.nElemts
                 grad = grad + self.crit.J{i}.grad(x, reshape( ...
-                    self.sino.Scans{1}, [], 1), [], self.prec);
+                    self.sino.Scans{1}, [], 1), []);
             end
-            grad = real(grad);
+            grad = real(self.Jac' * grad); % grad = C' * grad
+            self.nEvalP = self.nEvalP + 2;
         end
         
         function hess = hobj_local(self, x)
@@ -205,24 +211,27 @@ classdef RecModel < model.NlpModel
         
         function hess = hobjprod_local(self, x, ~, v)
             %% Computes the hessian of the objective function times x
-            x = real(x);
             hess = zeros(size(x));
+            x = self.Jac * x; % x = C * x;
+            v = self.Jac * v; % v = C * v;
             for i = 1 : self.crit.nElemts
                 hess = hess + self.crit.J{i}.prodHess(x, reshape( ...
-                    self.sino.Scans{1}, [], 1), v, self.prec);
+                    self.sino.Scans{1}, [], 1), v);
             end
-            hess = real(hess);
+            hess = real(self.Jac' * hess); % hess = C' * hess
+            self.nEvalP = self.nEvalP + 2;
         end
         
         function c = fcon_local(self, x)
             %% Computes the value of the constraints
             % In our case the constraint is Cx >= 0
-            c = real(self.prec.Direct(real(x)));
+            c = self.Jac * x;
         end
         
         function J = gcon_local(self, ~)
             %% Computes the gradient of the constraints
-            % In our case the constraint is Cx >= 0 so the jacobian is C
+            % In our case the constraint is Cx >= 0 so the jacobian is C.
+            % Note that C is symmetric.
             J = self.Jac;
         end
         
@@ -256,8 +265,7 @@ classdef RecModel < model.NlpModel
     end
     
     
-    methods (Access = private)
-        
+    methods (Access = protected)
         function z = precMult(self, z, mode)
             %% Evaluates C * z
             if mode == 1
@@ -266,8 +274,14 @@ classdef RecModel < model.NlpModel
                 z = self.prec.Adjoint(z);
             end
             z = real(z);
+            self.nEvalC = self.nEvalC + 1;
         end
         
+        function AddToEvalC(self, val)
+           %% AddToEvalC
+           % Increment the nEvalC counter, used in ProjRecModel
+           self.nEvalC = self.nEvalC + val;
+        end
     end
     
 end
