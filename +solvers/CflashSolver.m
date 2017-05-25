@@ -8,9 +8,10 @@ classdef CflashSolver < solvers.NlpSolver
     % functions that are required to project on the constraint set, which
     % are
     %       * project
-    %       * eqProject
+    %       * projectActiveFace
+    %       * projectMixedSet
     %
-    % A public attribute named
+    % A public attribute or method named
     %
     %       * normJac
     %
@@ -30,9 +31,6 @@ classdef CflashSolver < solvers.NlpSolver
         nSuccessIter; % number of successful iterations
         iterCg; % total number of CG iterations
         gNorm0; % norm of the gradient at x0
-        eqTol; % Tolerance for equalities (see indFree)
-        nProj; % # of projections
-        maxProj; % maximal # of projections
         mu0; % sufficient decrease parameter
         cgTol;
         fMin;
@@ -43,16 +41,12 @@ classdef CflashSolver < solvers.NlpSolver
         suffDec;
         maxIterLS;
         
-        maxExtraIter;
+        maxExtraIter; % Limit number of extrapolations or interpolations
         
-        projectActFace;
-        Jac;
-        JacJact;
-        krylOpts;
-        method;
-        
-        stats;
-        nEqProj;
+        eqTol; % Tolerance for equalities (see indFree)
+        nProj; % # of projections (project + projectMixed)
+        maxProj; % Maximal # of projections
+        nEqProj; % # of projections on the active face
     end
     
     properties (Hidden = true, Constant)
@@ -92,8 +86,12 @@ classdef CflashSolver < solvers.NlpSolver
             % Verifying if the model has the required methods & props
             if ~ismethod(nlp, 'project')
                 error('No project method in nlp');
+            elseif ~ismethod(nlp, 'projectMixed')
+                error('No projectMixed method in nlp');
+            elseif ~ismethod(nlp, 'projectActiveFace')
+                error('No projectActiveFace method in nlp');
             elseif ~isprop(nlp, 'normJac')  && ~ismethod(nlp, 'normJac')
-                error('No normJac attribute in nlp');
+                error('No normJac attribute or method in nlp');
             end
             
             % Parse input parameters and initialize local variables.
@@ -111,7 +109,6 @@ classdef CflashSolver < solvers.NlpSolver
             p.addParameter('maxIterLS', 10);
             p.addParameter('suffDec', 1e-4);
             p.addParameter('maxExtraIter', 15);
-            p.addParameter('method', 'pcg');
             
             p.parse(varargin{:});
             
@@ -136,55 +133,6 @@ classdef CflashSolver < solvers.NlpSolver
             
             import utils.PrintInfo;
             
-            self.method = p.Results.method;
-            % Update Krylov options for eqProject linear solvers
-            self.krylOpts.etol = self.eqTol;
-            self.krylOpts.rtol = self.eqTol;
-            self.krylOpts.atol = self.eqTol;
-            self.krylOpts.btol = self.eqTol;
-            self.krylOpts.itnlim = self.nlp.n;
-            
-            % Setting the projection on equality constraints function
-            if isa(self.nlp.gcon([]), 'opSpot')
-                % If the Jacobian is already an opSpot, keep it
-                self.Jac = self.nlp.gcon([]);
-                % Probe the NLP model for JacJact property
-                if isprop(self.nlp, 'JacJact')
-                    % There is a more efficient way to compute J*J'
-                    self.JacJact = self.nlp.JacJact;
-                else
-                    % Simply create J*J'
-                    self.JacJact = opFoG(self.Jac, self.Jac');
-                end
-                
-                if strcmp(p.Results.method, 'lsqr')
-                    import krylov.lsqr_spot;
-                    self.projectActFace = @(d, ind) self.callLsqr(d, ind);
-                elseif strcmp(p.Results.method, 'lsmr')
-                    import krylov.lsmr_spot;
-                    self.projectActFace = @(d, ind) self.callLsmr(d, ind);
-                elseif strcmp(p.Results.method, 'minres')
-                    % MinRes
-                    import krylov.minres_spot;
-                    self.projectActFace = @(d, ind) self.callMinres(d, ind);
-                else
-                    % Default to PCG
-                    self.projectActFace = @(d, ind) self.callPcg(d, ind);
-                end
-            else
-                % Matrix is in double format, so we invert it using \
-                self.Jac = self.nlp.gcon([]);
-                self.projectActFace = @(d, ind) self.doMatInv(d, ind);
-            end
-            
-            self.stats.proj = struct;
-            self.stats.proj.info = [0, 0, 0];
-            self.stats.proj.infoHeader = {'avg pgNorm', ...
-                'avg solveTime', 'total solveTime'};
-            self.stats.eqProj = struct;
-            self.stats.eqProj.info = [0, 0, 0];
-            self.stats.eqProj.infoHeader = {'avg pgNorm', ...
-                'avg solveTime', 'total solveTime'};
         end % constructor
         
         function self = solve(self)
@@ -216,9 +164,9 @@ classdef CflashSolver < solvers.NlpSolver
             
             if self.verbose >= 2
                 extra = containers.Map( ...
-                    {'fMin', 'cgTol', 'mu0', 'maxProj', 'eqTol', ...
-                    'method'}, {self.fMin, self.cgTol, self.mu0, ...
-                    self.maxProj, self.eqTol, self.method});
+                    {'fMin', 'cgTol', 'mu0', 'maxProj', 'eqTol'}, ...
+                    {self.fMin, self.cgTol, self.mu0, ...
+                    self.maxProj, self.eqTol});
                 printObj.header(self, extra);
                 self.printf(self.LOG_HEADER_FORMAT, self.LOG_HEADER{:});
             end
@@ -340,44 +288,32 @@ classdef CflashSolver < solvers.NlpSolver
         
         function xProj = project(self, x)
             %% Project - simple wrapper to increment nProj counter
-            xProj = self.nlp.project(x);
-            if ~self.nlp.solved
+            [xProj, solved] = self.nlp.project(x);
+            if ~solved
                 % Propagate throughout the program to exit
                 self.iStop = self.EXIT_PROJ_FAILURE;
             end
-            
-            % This can be removed later
-            if isprop(self.nlp, 'projSolver')
-                solver = self.nlp.projSolver;
-                % Cumulative average of ||Pg|| & solv. time & total solv.
-                self.stats.proj.info = [(self.nProj * ...
-                    self.stats.proj.info(1:2) + [solver.pgNorm, ...
-                    solver.solveTime])/(self.nProj + 1), ...
-                    self.stats.proj.info(3) + solver.solveTime];
-            end
-            
             self.nProj = self.nProj + 1;
         end
         
         function xProj = projectMixed(self, x, fixed)
-            %%
-            xProj = self.nlp.projectMixed(x, fixed);
-            if ~self.nlp.solved
+            %% ProjectMixed - simple wrapper to increment nProj counter
+            [xProj, solved] = self.nlp.projectMixed(x, fixed);
+            if ~solved
                 % Propagate throughout the program to exit
                 self.iStop = self.EXIT_PROJ_FAILURE;
             end
-            
-            % This can be removed later
-            if isprop(self.nlp, 'projSolver')
-                solver = self.nlp.projSolver;
-                % Cumulative average of ||Pg|| & solv. time & total solv.
-                self.stats.proj.info = [(self.nProj * ...
-                    self.stats.proj.info(1:2) + [solver.pgNorm, ...
-                    solver.solveTime])/(self.nProj + 1), ...
-                    self.stats.proj.info(3) + solver.solveTime];
-            end
-            
             self.nProj = self.nProj + 1;
+        end
+        
+        function xProj = projectActiveFace(self, x, fixed)
+            %% ProjectActiveFace - simple wrapper to increment nEqProj
+            [xProj, solved] = self.nlp.projectActiveFace(x, fixed);
+            if ~solved
+                % Propagate throughout the program to exit
+                self.iStop = self.EXIT_PROJ_FAILURE;
+            end
+            self.nEqProj = self.nEqProj + 1;
         end
         
     end % public methods
@@ -654,8 +590,8 @@ classdef CflashSolver < solvers.NlpSolver
                 end
                 
                 % Hs & g must be such that (Cp)_i = 0 \forall i \in fixed
-                Hs = self.projectActFace(Hs, fixed);
-                gP = self.projectActFace(g, fixed);
+                Hs = self.projectActiveFace(Hs, fixed);
+                gP = self.projectActiveFace(g, fixed);
                 % Compute the grad of quad q = g + H*(x{k, j} - x_k)
                 gQuad = Hs + gP;
                 
@@ -680,7 +616,7 @@ classdef CflashSolver < solvers.NlpSolver
                 
                 % Compute H*(x[k+1] - x[0]) and store in w.
                 Hs = H * s;
-                HsP = self.projectActFace(Hs, fixed);
+                HsP = self.projectActiveFace(Hs, fixed);
                 
                 % Convergence and termination test.
                 % We terminate if the preconditioned conjugate gradient
@@ -762,7 +698,7 @@ classdef CflashSolver < solvers.NlpSolver
             w = zeros(self.nlp.n, 1);
             % Initialize the residual r of grad q to -g.
             r = -g; % g is already projected
-            %             r = self.projectActFace(-g, fixed);
+            %             r = self.projectActiveFace(-g, fixed);
             % Initialize the direction p.
             p = r;
             % Initialize rho and the norms of r.
@@ -815,7 +751,7 @@ classdef CflashSolver < solvers.NlpSolver
                 
                 % Update w and the residuals r.
                 w = w + alph*p;
-                r = r - alph*self.projectActFace(q, fixed);
+                r = r - alph*self.projectActiveFace(q, fixed);
                 % Exit if the residual convergence test is satisfied.
                 rtr = r'*r;
                 rnorm = sqrt(rtr);
@@ -883,136 +819,6 @@ classdef CflashSolver < solvers.NlpSolver
         
         function appZero = getAppZero(self, x)
             appZero = max(self.eqTol * self.nlp.normJac * norm(x), eps);
-        end
-        
-        function wProj = callPcg(self, d, fixed)
-            %% CallPcg
-            % Solves the problem
-            % min   1/2 || w - d||^2
-            %   w   sc (C*w)_i = 0, for i \not \in the working set
-            % where C is the jacobian of the linear constraints and i
-            % denotes the indices of the fixed variables. This problem has
-            % an analytical solution.
-            %
-            % From the first order KKT conditions, we can obtain the
-            % following set of equations:
-            %
-            %   w               = d + B*C*z
-            %   (B*C*C'*B') * z = -B*C*d
-            %
-            % where z is the lagrange mutliplier associated with the
-            % equality constraint.
-            %
-            % Inputs:
-            %   - d: vector to project on the equality constraint set
-            %   - fixed: indices not in the working set
-            % Ouput:
-            %   - wProj: projected direction
-            
-            subC = self.Jac(fixed, :); % B * C
-            subCCt = self.JacJact(fixed, fixed);
-            
-            eqProjTime = tic;
-            [z, ~, relres] = pcg(subCCt, subC*(-d), ...
-                self.eqTol, self.nlp.n);
-            wProj = d + (subC' * z);
-            eqProjTime = toc(eqProjTime);
-            
-            % Cumulative average of ||Pg|| & solv. time & total solv.
-            self.stats.eqProj.info = [(self.nEqProj * ...
-                self.stats.eqProj.info(1:2) + [norm(relres), ...
-                eqProjTime])/(self.nEqProj + 1), ...
-                self.stats.eqProj.info(3) + eqProjTime];
-            
-            self.nEqProj = self.nEqProj + 1;
-        end
-        
-        function wProj = callMinres(self, d, fixed)
-            %% CallMinres
-            % Solves the problem
-            % min   1/2 || w - d||^2
-            %   w   sc (C*w)_i = 0, for i \in fixed
-            % See callPcg's documentation
-            
-            subC = self.Jac(fixed, :); % B * C
-            subCCt = self.JacJact(fixed, fixed);
-            temp = subC*(-d);
-            
-            eqProjTime = tic;
-            [z, ~, rnorm] = krylov.minres_spot(subCCt, temp, self.krylOpts);
-            wProj = d + (subC' * z);
-            eqProjTime = toc(eqProjTime);
-            
-            rnorm = (rnorm.rnorm) / norm(temp);
-            
-            % Cumulative average of ||Pg|| & solv. time & total solv.
-            self.stats.eqProj.info = [(self.nEqProj * ...
-                self.stats.eqProj.info(1:2) + [rnorm, ...
-                eqProjTime])/(self.nEqProj + 1), ...
-                self.stats.eqProj.info(3) + eqProjTime];
-            
-            self.nEqProj = self.nEqProj + 1;
-        end
-        
-        function wProj = callLsqr(self, d, fixed)
-            %% CallLsqr
-            % Solves the problem
-            % min   1/2 || w - d||^2
-            %   w   sc (C*w)_i = 0, for i \in fixed
-            % See callPcg's documentation
-            
-            subC = self.Jac(fixed, :); % B * C
-            
-            eqProjTime = tic;
-            z = krylov.lsqr_spot(subC', -d, self.krylOpts);
-            wProj = d + (subC' * z);
-            eqProjTime = toc(eqProjTime);
-            
-            % Cumulative average of ||Pg|| & solv. time & total solv.
-            self.stats.eqProj.info = [NaN, (self.nEqProj * ...
-                self.stats.eqProj.info(2) + eqProjTime) / ...
-                (self.nEqProj + 1), ...
-                self.stats.eqProj.info(3) + eqProjTime];
-            
-            self.nEqProj = self.nEqProj + 1;
-        end
-        
-        function wProj = callLsmr(self, d, fixed)
-            %% CallLsmr
-            % Solves the problem
-            % min   1/2 || w - d||^2
-            %   w   sc (C*w)_i = 0, for i \in fixed
-            % See callPcg's documentation
-            
-            subC = self.Jac(fixed, :); % B * C
-            
-            eqProjTime = tic;
-            z = krylov.lsmr_spot(subC', -d, self.krylOpts);
-            wProj = d + (subC' * z);
-            eqProjTime = toc(eqProjTime);
-            
-            % Cumulative average of ||Pg|| & solv. time & total solv.
-            self.stats.eqProj.info = [NaN, (self.nEqProj * ...
-                self.stats.eqProj.info(2) + eqProjTime) / ...
-                (self.nEqProj + 1), ...
-                self.stats.eqProj.info(3) + eqProjTime];
-            
-            self.nEqProj = self.nEqProj + 1;
-        end
-        
-        function wProj = doMatInv(self, d, fixed)
-            %% DoMatInv
-            % Solves the problem
-            % min   1/2 || w - d||^2
-            %   w   sc (C*w)_i = 0, for i \in fixed
-            % Matrix Inversion of B*C*C'*B'
-            
-            subC = self.Jac(fixed, :); % B * C
-            
-            z = (subC * subC') \ (subC * -d);
-            wProj = d + (subC' * z);
-            
-            self.nEqProj = self.nEqProj + 1;
         end
         
         
