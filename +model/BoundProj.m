@@ -14,16 +14,17 @@ classdef BoundProj < handle
     
     methods (Access = public)
         
-        function z = project(self, x)
+        function [z, solved] = project(self, x)
             %% Project on bounds
             % Input
             %   - x: point to project
             % Output
             %   - z: projection of x
             z = min(max(x, self.bL), self.bU);
+            solved = true;
         end
         
-        function z = projectSel(self, x, sel)
+        function [z, solved] = projectSel(self, x, sel)
             %% ProjectSel - project on bounds for a selected set of indices
             % Inputs
             %   - x: point to project
@@ -31,6 +32,7 @@ classdef BoundProj < handle
             % Output
             %   - z: projection of x
             z = min(max(x(sel), self.bL(sel)), self.bU(sel));
+            solved = true;
         end
         
     end

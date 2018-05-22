@@ -43,7 +43,7 @@ classdef LinIneqProj < handle
             %   - z: projection of x
             
             C = self.gcon(x);
-            A = [C(self.iLow, :).', -C(self.iUpp,:).'];
+            A = [C(self.iLow, :)', -C(self.iUpp)'];
             b = [-self.cL(self.iLow); self.cU(self.iUpp)];
             
             temp = sum(self.iUpp + self.iLow);
@@ -53,7 +53,7 @@ classdef LinIneqProj < handle
             
             % H := A' * A
             % f := -A'*x + b
-            [d, ~, flag] = quadprog(A.'*A, A.'*x + b, [], [], [], [], lb, ub, [], ...
+            [d, ~, flag] = quadprog(A'*A, A'*x + b, [], [], [], [], lb, ub, [], ...
                 self.QUADPROG_OPTS);
             
             z = x + A * d;
@@ -76,23 +76,24 @@ classdef LinIneqProj < handle
             % Output
             %   - z: projection of x
             
+            xSel = x;
             C = self.gcon(x);
-            %C = C(sel, :);
+            C = C(sel, :);
             
-            A = [C(self.iLow & sel,:).', -C(self.iUpp & sel,:).'];
-            b = [-self.cL(self.iLow & sel); self.cU(self.iUpp & sel)];
+            A = [-C', C'];
+            b = [self.cL(sel); -self.cU(sel)];
             
-            temp = sum( self.iUpp(sel) + self.iLow(sel));
+            temp = sum(self.iUpp(sel) + self.iLow(sel));
             
             lb = zeros(temp, 1);
             ub = inf(temp, 1);
             
             % H := A' * A
             % f := A'*x - b
-            [z, ~, flag] = quadprog(A.'*A, (A.'*x + b), [], [], [], [], lb, ub, ...
+            [z, ~, flag] = quadprog(A'*A, (A'*xSel + b), [], [], [], [], lb, ub, ...
                 [], self.QUADPROG_OPTS);
             
-            z = x + A * z;
+            z = xSel + A * z;
             solved = (flag == 1);
         end
         
@@ -128,7 +129,8 @@ classdef LinIneqProj < handle
             % Output
             %   - z: projection of x
             
-            C = speye(length(x));
+            C = speye(length(x(sel)));
+            d = x(sel);
             
             % lsqlin only allows to solve for A*x <= b, therefore the
             % lower bound must be rewritten
@@ -136,7 +138,7 @@ classdef LinIneqProj < handle
             A = [tempC(sel, :); -tempC(sel, :)];
             b = [self.cU(sel); -self.cL(sel)];
             
-            [z, ~, ~, flag] = lsqlin(C, x, A, b, [], [], [], [], [], self.LSQLIN_OPTS);
+            [z, ~, ~, flag] = lsqlin(C, d, A, b, [], [], [], [], [], self.LSQLIN_OPTS);
             solved = (flag == 1);
         end
         

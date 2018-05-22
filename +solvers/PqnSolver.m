@@ -356,8 +356,8 @@ classdef PqnSolver < solvers.NlpSolver
         
         function z = project(self, x)
             %% Project - projecting x on the constraint set
-            z = self.nlp.project(x);
-            if ~self.nlp.solved
+            [z, solved] = self.nlp.project(x);
+            if ~solved
                 % Propagate throughout the program to exit
                 self.iStop = self.EXIT_PROJ_FAILURE;
             end
