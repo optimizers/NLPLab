@@ -64,11 +64,10 @@ classdef ShiftedQpModel < model.NlpModel
             end
         end
         
-        function z = project(self, p)
+        function [z, solved] = project(self, p)
             %% Project
             % Pass the input argument to the projection function handle
-            z = self.nlpProj.project(p);
-            self.solved = self.nlpProj.solved;
+            [z, solved] = self.nlpProj.project(p);
         end
         
         function f = fobj_local(self, p)

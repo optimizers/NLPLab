@@ -10,7 +10,7 @@ classdef LinEqProj < handle
     
     methods (Access = public)
         
-        function z = project(self, x)
+        function [z, solved] = project(self, x)
             %% Project on linear equalities
             % Analytical solution of
             % min_z { 1/2 || z - x ||^2 : C * z = c }
@@ -24,26 +24,28 @@ classdef LinEqProj < handle
             C = self.C;
             z = (C * C') \ (self.cU - C*x);
             z = x + (C' * z);
+            solved = true;
         end
         
-        function z = projectSel(self, x, sel)
+        function [z, solved] = projectSel(self, x, sel)
             %% ProjectSel - project on lin. eq. for selected indices
             % Analytical solution of
             % min_z { 1/2 || z - x ||^2 : C * z = c }
             % Inputs
             %   - x: point to project
-            %   - sel: bool array that represents a subset of x to project
+            %   - sel: bool array that represents a subset of 
+            %   the constraints to project on
             % Output
             %   - z: projection of x
             
             assert(all(self.cL == self.cU));
             
-            xSel = x(sel);
             C = self.C(sel, :);
             c = self.cU(sel);
             
-            z = (C * C') \ (c - C * xSel);
-            z = xSel + (C' * z);
+            z = (C * C') \ (c - C * x);
+            z = x + (C' * z);
+            solved = true;
         end
         
     end
