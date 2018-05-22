@@ -247,7 +247,7 @@ classdef CflashSolver < solvers.NlpSolver
                         preRed, delta);
                     
                     % Accept or reject step
-                    if actRed > self.eta0 * preRed;
+                    if actRed > self.eta0 * preRed
                         % Successful step
                         status = '';
                         self.nSuccessIter = self.nSuccessIter + 1;
@@ -339,7 +339,7 @@ classdef CflashSolver < solvers.NlpSolver
             end
             
             % Changing delta according to a set of rules:
-            if actRed < self.eta0 * preRed || actRed == -inf;
+            if actRed < self.eta0 * preRed || actRed == -inf
                 delta = min(max(alph, self.sig1) * snorm, ...
                     self.sig2 * delta);
             elseif actRed < self.eta1 * preRed
