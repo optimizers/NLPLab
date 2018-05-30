@@ -516,7 +516,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 
                 Hfree = H(indFree, indFree);
                 
-                [w, iterTR, infoTR] = solvers.BcflashSolver.trpcg( ...
+                [w, iterTR, infoTR] = self.trpcg( ...
                     Hfree, gQuad, delta, tol, self.maxIterCg, s(indFree));
                 iters = iters + iterTR;
                 
@@ -610,21 +610,7 @@ classdef BcflashSolver < solvers.NlpSolver
             brptMax = max([brptInc; brptDec]);
         end % breakpt
         
-    end % private methods
-    
-    
-    methods (Access = public, Hidden = true)
-        
-        function printf(self, varargin)
-            fprintf(self.fid, varargin{:});
-        end
-        
-    end % hidden public methods
-    
-    
-    methods (Access = private, Static)
-        
-        function [w, iters, info] = trpcg(H, g, delta, tol, iterMax, s)
+        function [w, iters, info] = trpcg(self, H, g, delta, tol, iterMax, s)
             %% TRPCG - Trust-region projected conjugate gradient
             % This subroutine uses a truncated conjugate gradient method to
             % find an approximate minimizer of the trust-region subproblem
@@ -742,6 +728,22 @@ classdef BcflashSolver < solvers.NlpSolver
             self.logger.debug(sprintf( ...
                 'Leaving TRPCG, info = %d (fail)', info));
         end % trpcg
+        
+    end % private methods
+    
+    
+    methods (Access = public, Hidden = true)
+        
+        function printf(self, varargin)
+            fprintf(self.fid, varargin{:});
+        end
+        
+    end % hidden public methods
+    
+    
+    methods (Access = private, Static)
+        
+        
         
         function sigma = trqsol(x, p, delta)
             %% TRQSOL - Largest solution of the TR equation.
