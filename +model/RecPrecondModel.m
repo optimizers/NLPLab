@@ -55,7 +55,7 @@ classdef RecPrecondModel < model.NlpModel
             
             % Gathering optinal arguments and setting default values
             p = inputParser;
-            p.addParameter('mu0', []);
+            p.addParameter('mu0',  []);
             p.addParameter('name', '');
 
             % Parsing input arguments

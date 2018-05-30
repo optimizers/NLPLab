@@ -525,9 +525,10 @@ classdef BcflashPrecSolver < solvers.NlpSolver
                 tol = self.cgTol * gNorm;
                 
                 Hfree = H(indFree, indFree);
+                CCtfree = self.nlp.CCt(indFree, indFree);
                 
-                [w, iterTR, infoTR] = solvers.BcflashPrecSolver.trpcg( ...
-                    Hfree, gQuad, delta, tol, self.maxIterCg, s(indFree));
+                [w, iterTR, infoTR] = self.trpcg( ...
+                    Hfree, gQuad, CCtfree, delta, tol, self.maxIterCg, s(indFree));
                 iters = iters + iterTR;
                 
                 % Use a projected search to obtain the next iterate.
@@ -588,7 +589,7 @@ classdef BcflashPrecSolver < solvers.NlpSolver
             
             p = g;
             p(Iplus) = 0;
-            p = self.nlp.CCt(p);
+            p = self.nlp.CCt*p;
             p(Iplus) = 0;
         end
         
@@ -647,21 +648,7 @@ classdef BcflashPrecSolver < solvers.NlpSolver
             brptMax = max([brptInc; brptDec]);
         end % breakpt
         
-    end % private methods
-    
-    
-    methods (Access = public, Hidden = true)
-        
-        function printf(self, varargin)
-            fprintf(self.fid, varargin{:});
-        end
-        
-    end % hidden public methods
-    
-    
-    methods (Access = private, Static)
-        
-        function [w, iters, info] = trpcg(H, g, delta, tol, iterMax, s)
+        function [w, iters, info] = trpcg(self, H, g, CCt, delta, tol, iterMax, s)
             %% TRPCG - Trust-region projected conjugate gradient
             % This subroutine uses a truncated conjugate gradient method to
             % find an approximate minimizer of the trust-region subproblem
@@ -705,11 +692,13 @@ classdef BcflashPrecSolver < solvers.NlpSolver
             w = zeros(n, 1);
             % Initialize the residual r of grad q to -g.
             r = -g;
+            % Initialize the preconditioned search direction
+            z = CCt * r;
             % Initialize the direction p.
-            p = r;
+            p = z;
             % Initialize rho and the norms of r and t.
-            rho = r'*r;
-            rnorm0 = sqrt(rho);
+            rho = r'*z;
+            rnorm0 = norm(r);
             
             % Exit if g = 0.
             if rnorm0 == 0
@@ -732,7 +721,7 @@ classdef BcflashPrecSolver < solvers.NlpSolver
                 else
                     alph = 0;
                 end
-                sigma = solvers.BcflashSolver.trqsol(w + s, p, delta);
+                sigma = solvers.BcflashPrecSolver.trqsol(w + s, p, delta);
                 % Exit if there is negative curvature or if the
                 % iterates exit the trust region.
                 self.logger.debug(sprintf('\tαCG = %7.1e, σ = %7.1e', ...
@@ -759,8 +748,7 @@ classdef BcflashPrecSolver < solvers.NlpSolver
                 r = r - alph * q;
                 
                 % Exit if the residual convergence test is satisfied.
-                rtr = r'*r;
-                rnorm = sqrt(rtr);
+                rnorm = norm(r);
                 self.logger.debug(sprintf('\t||r''*r|| = %7.3e', rnorm));
                 if rnorm <= tol
                     info = 1;
@@ -769,16 +757,35 @@ classdef BcflashPrecSolver < solvers.NlpSolver
                     return
                 end
                 
+                % Compute the new preconditioned direction
+                z = CCt * r;
+                rtz = r'*z;
                 % Compute p = r + betaFact*p and update rho.
-                betaFact = rtr/rho;
-                p = r + betaFact*p;
-                rho = rtr;
+                betaFact = rtz/rho;
+                p = z + betaFact*p;
+                rho = rtz;
             end % for loop
             
             info = 4;
             self.logger.debug(sprintf( ...
                 'Leaving TRPCG, info = %d (fail)', info));
         end % trpcg
+        
+    end % private methods
+    
+    
+    methods (Access = public, Hidden = true)
+        
+        function printf(self, varargin)
+            fprintf(self.fid, varargin{:});
+        end
+        
+    end % hidden public methods
+    
+    
+    methods (Access = private, Static)
+        
+        f
         
         function sigma = trqsol(x, p, delta)
             %% TRQSOL - Largest solution of the TR equation.
