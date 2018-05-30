@@ -182,7 +182,7 @@ classdef BcflashSolver < solvers.NlpSolver
                         preRed, delta);
                     
                     % Accept or reject step
-                    if actRed > self.eta0 * preRed;
+                    if actRed > self.eta0 * preRed
                         % Successful step
                         status = '';
                         self.nSuccessIter = self.nSuccessIter + 1;
@@ -254,7 +254,7 @@ classdef BcflashSolver < solvers.NlpSolver
             end
             
             % Changing delta according to a set of rules:
-            if actRed < self.eta0 * preRed || actRed == -inf;
+            if actRed < self.eta0 * preRed || actRed == -inf
                 delta = min(max(alph, self.sig1) * snorm, ...
                     self.sig2 * delta);
             elseif actRed < self.eta1 * preRed
@@ -290,17 +290,22 @@ classdef BcflashSolver < solvers.NlpSolver
             %
             % where mu_0 is a constant in (0,1).
             
+            self.logger.debug('-- Entering Cauchy --');
+            self.logger.debug(sprintf('α = %7.1e, δ = %7.3e', ...
+                alph, delta));
             interpf =  0.1;     % interpolation factor
             extrapf = 1 / interpf;     % extrapolation factor
             
             % Find the minimal and maximal break-point on x - alph*g.
             [~, ~, brptMax] = self.breakpt(x, -g);
+            self.logger.debug(sprintf('brptMax = %7.1e', brptMax));
             
             % Evaluate the initial alph and decide if the algorithm
             % must interpolate or extrapolate.
             s = self.gpstep(x, -alph, g);
-            
-            if norm(s) >= delta
+            sNorm = norm(s);
+            self.logger.debug(sprintf('||s|| = %7.3e', sNorm));
+            if sNorm >= delta
                 interp = true;
             else
                 gts = g'*s;
@@ -309,13 +314,16 @@ classdef BcflashSolver < solvers.NlpSolver
             
             % Either interpolate or extrapolate to find a successful step.
             if interp
+                self.logger.debug('Interpolating');
                 % Reduce alph until a successful step is found.
                 while (toc(self.solveTime) < self.maxRT)
                     % This is a crude interpolation procedure that
                     % will be replaced in future versions of the code.
                     alph = interpf * alph;
                     s = self.gpstep(x, -alph, g);
-                    if norm(s) <= delta
+                    sNorm = norm(s);
+                    self.logger.debug(sprintf('\t||s|| = %7.3e', sNorm));
+                    if sNorm <= delta
                         gts = g'*s;
                         if 0.5 * s'*H*s + gts < self.mu0 * gts
                             break
@@ -323,6 +331,7 @@ classdef BcflashSolver < solvers.NlpSolver
                     end
                 end
             else
+                self.logger.debug('Extrapolating');
                 % Increase alph until a successful step is found.
                 alphs = alph;
                 iter = 1;
@@ -333,7 +342,9 @@ classdef BcflashSolver < solvers.NlpSolver
                     % will be replaced in future versions of the code.
                     alph = extrapf * alph;
                     s = self.gpstep(x, -alph, g);
-                    if norm(s) <= delta
+                    sNorm = norm(s);
+                    self.logger.debug(sprintf('\t||s|| = %7.3e', sNorm));
+                    if sNorm <= delta
                         gts = g' * s;
                         if 0.5 * s'*H*s + gts > self.mu0 * gts
                             break
@@ -347,6 +358,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 % Recover the last successful step.
                 alph = alphs;
                 s = self.gpstep(x, -alph, g);
+                self.logger.debug(sprintf('Leaving Cauchy, α = %7.1e', alph));
             end
             
         end % cauchy
@@ -389,6 +401,7 @@ classdef BcflashSolver < solvers.NlpSolver
             %     the quadratic q at x such that the quadratic is
             %     decreasing in the ray  x + alph*w for 0 <= alph <= 1.
             
+            self.logger.debug('-- Entering prsrch --');
             interpf = 0.5; % Interpolation factor
             
             % Set the initial alph = 1 because the quadratic function is
@@ -397,13 +410,16 @@ classdef BcflashSolver < solvers.NlpSolver
             
             % Find the smallest break-point on the ray x + alph*w.
             [~, brptMin, ~] = self.breakpt(x, w, indFree);
+            self.logger.debug(sprintf('brptMin = %7.1e', brptMin));
             
             % Reduce alph until the sufficient decrease condition is
             % satisfied or x + alph*w is feasible.
+            self.logger.debug('Interpolating');
             while (alph > brptMin) && (toc(self.solveTime) < self.maxRT)
                 % Calculate P[x + alph*w] - x and check the sufficient
                 % decrease condition.
                 s = self.gpstep(x, alph, w, indFree);
+                self.logger.debug(sprintf('\t||s|| = %7.3e', norm(s)));
                 gts = g' * s;
                 if 0.5 * s'*H*s + gts <= self.mu0 * gts
                     return
@@ -466,6 +482,7 @@ classdef BcflashSolver < solvers.NlpSolver
             % not allow further progress, that is, || p[k] || = delta.
             % In this case the final x satisfies q(x) < q(x[k]).
             
+            self.logger.debug('-- Entering SPCG --');
             % Compute the Cauchy point
             x = x + s;
             Hs = H * s;
@@ -523,6 +540,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 if norm(Hs(indFree) + wa) <= tol || infoTR == 2 || ...
                         infoTR == 3 || iters > self.maxIterCg || ...
                         toc(self.solveTime) >= self.maxRT
+                    self.logger.debug('Leaving SPCG');
                     break;
                 end
             end % faces
@@ -641,6 +659,10 @@ classdef BcflashSolver < solvers.NlpSolver
             %
             %       info = 4  Failure to converge within iterMax iters.
             
+            self.logger.debug('-- Entering TRPCG --');
+            self.logger.debug(sprintf( ...
+                'tol = %7.3e, δ = %7.3e,', tol, delta));
+            
             n = length(g);
             % Initialize the iterate w and the residual r.
             w = zeros(n, 1);
@@ -656,6 +678,8 @@ classdef BcflashSolver < solvers.NlpSolver
             if rnorm0 == 0
                 iters = 0;
                 info = 1;
+                self.logger.debug(sprintf(['Leaving TRPCG, info', ...
+                    '= %d (conv)'], info));
                 return
             end
             
@@ -665,6 +689,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 % Compute alph and determine sigma such that the TR
                 % constraint || w + sigma*p || = delta is satisfied.
                 ptq = p'*q;
+                self.logger.debug(sprintf('\tp''*H*p = %7.3e', ptq));
                 if ptq > 0
                     alph = rho/ptq;
                 else
@@ -673,14 +698,22 @@ classdef BcflashSolver < solvers.NlpSolver
                 sigma = solvers.BcflashSolver.trqsol(w + s, p, delta);
                 % Exit if there is negative curvature or if the
                 % iterates exit the trust region.
+                self.logger.debug(sprintf('\tαCG = %7.1e, σ = %7.1e', ...
+                    alph, sigma));
                 if (ptq <= 0 || alph >= sigma)
                     if sigma ~= 0
                         w = w + sigma*p;
                     end
                     if ptq <= 0
                         info = 2;
+                        self.logger.debug(sprintf( ...
+                            ['Leaving TRPCG, info', ...
+                            ' = %d (negative curv)'], info));
                     else
                         info = 3;
+                        self.logger.debug(sprintf( ...
+                            ['Leaving TRPCG, info', ...
+                            ' = %d (exit TR)'], info));
                     end
                     return
                 end
@@ -691,8 +724,11 @@ classdef BcflashSolver < solvers.NlpSolver
                 % Exit if the residual convergence test is satisfied.
                 rtr = r'*r;
                 rnorm = sqrt(rtr);
+                self.logger.debug(sprintf('\t||r''*r|| = %7.3e', rnorm));
                 if rnorm <= tol
                     info = 1;
+                    self.logger.debug(sprintf(['Leaving TRPCG, info', ...
+                        ' = %d (conv)'], info));
                     return
                 end
                 
@@ -703,6 +739,8 @@ classdef BcflashSolver < solvers.NlpSolver
             end % for loop
             
             info = 4;
+            self.logger.debug(sprintf( ...
+                'Leaving TRPCG, info = %d (fail)', info));
         end % trpcg
         
         function sigma = trqsol(x, p, delta)
