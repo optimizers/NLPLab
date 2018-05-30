@@ -1,11 +1,15 @@
-classdef RecModel < model.NlpModel
+classdef RecPrecondModel < model.NlpModel
     %% RecModel - Model representing the the reconstruction problem
     %   This class was developped to represent the following problem
     %
-    %   min     1/2 || PCx - y ||^2 + \lambda\phi(Cx)
-    %     x     Cx >= 0
+    %   min     1/2 || Px - y ||^2 + \lambda\phi(x)
+    %     x     x >= 0
     %
-    %   where P and C are matrices that don't have an explicit form, i.e.
+    %   where P is a projection matrix.
+    %   This class includes a preconditioning features that can be used to 
+    %   generate a descent direction or switch to the preconditioned space.
+    %   
+    %   P and C are matrices that don't have an explicit form, i.e.
     %   only their matrix-vector product is available.
     %
     %   This class is a subclass of NLP model and can therefore be passed
@@ -30,14 +34,15 @@ classdef RecModel < model.NlpModel
         nEvalP; % Counts the number of products with P
         nEvalC; % Counts the number of products with C
         
-        Jac; % opSpot of the Jacobian
+        C;   % opSpot of the preconditioner
+        CCt; % opSpot of C*Ct
     end
     
     
     %% Public methods
     methods (Access = public)
         
-        function self = RecModel(crit, prec, sino, geos, varargin)
+        function self = RecPrecondModel(crit, prec, sino, geos, varargin)
             %% Constructor
             % Inputs:
             %   - crit: Critere object from the Poly-LION repository
@@ -92,23 +97,25 @@ classdef RecModel < model.NlpModel
             
             % Converting to the preconditionned variable
             % mu = Cx <=> x = C^-1 mu
-            x0 = prec.Inverse(mu0);
+            x0 = mu0;
             
             % Bounds of the problem. cU & cL represent the bounds on the
             % constraints and bU & bL represent the bounds on the
             % variables. Equalities are assumed to be the cases where
             % cU_i = cL_i.
-            % Cx >= 0 is the only constraint. C is symmetric.
-            cU = inf(geos.nVoxels, 1);
-            cL = zeros(geos.nVoxels, 1);
-            bL = -inf(geos.nVoxels, 1);
+            % x >= 0 is the only constraint. C is symmetric.
+            cU = []; %inf(geos.nVoxels, 1);
+            cL = []; %-inf(geos.nVoxels, 1);
+            bL = zeros(geos.nVoxels, 1);
             bU = inf(geos.nVoxels, 1);
             
             % Calling the NlpModel superclass
             self = self@model.NlpModel(name, x0, cL, cU, bL, bU);
             
             % Constraints are linear
-            self.linear = true(self.m, 1);
+            % self.linear = true(self.m, 1);
+            % There are no constraints apart from the bounds
+            self.linear = [];
             
             % Assigning properties
             self.crit = crit;
@@ -122,8 +129,10 @@ classdef RecModel < model.NlpModel
             self.nEvalC = 0;
             
             %% Setting opSpots to help with the projections
-            self.Jac = opFunction(self.objSize, self.objSize, ...
+            self.C = opFunction(self.objSize, self.objSize, ...
                 @(x, mode) self.precMult(x, mode));
+            self.CCt = opFunction(self.objSize, self.objSize, ...
+                @(x, mode) self.precPrectMult(x, mode));
             
         end
         
@@ -164,39 +173,32 @@ classdef RecModel < model.NlpModel
             % already made.
             fObj = 0;
             grad = zeros(size(x));
-            x = self.Jac * x; % x = C * x
             for i = 1 : self.crit.nElemts
                 vals = self.crit.J{i}.objGrad(x, reshape( ...
                     self.sino.Scans{1}, [], 1), []);
                 fObj = fObj + vals.fObj;
                 grad = grad + vals.grad;
             end
-            fObj = real(fObj);
-            grad = real(self.Jac' * grad); % grad = C' * grad
             self.nEvalP = self.nEvalP + 2;
         end
         
         function fObj = fobj_local(self, x)
             %% Computes the value of the objective function
             fObj = 0;
-            x = self.Jac * x; % x = C * x
             for i = 1 : self.crit.nElemts
                 fObj = fObj + self.crit.J{i}.objFunc(x, reshape( ...
                     self.sino.Scans{1}, [], 1), []);
             end
-            fObj = real(fObj);
             self.nEvalP = self.nEvalP + 1;
         end
         
         function grad = gobj_local(self, x)
             %% Computes the value of the gradient of the obj. func.
             grad = zeros(size(x));
-            x = self.Jac * x; % x = C * x
             for i = 1 : self.crit.nElemts
                 grad = grad + self.crit.J{i}.grad(x, reshape( ...
                     self.sino.Scans{1}, [], 1), []);
             end
-            grad = real(self.Jac' * grad); % grad = C' * grad
             self.nEvalP = self.nEvalP + 2;
         end
         
@@ -212,32 +214,28 @@ classdef RecModel < model.NlpModel
         function hess = hobjprod_local(self, x, ~, v)
             %% Computes the hessian of the objective function times x
             hess = zeros(size(x));
-            x = self.Jac * x; % x = C * x;
-            v = self.Jac * v; % v = C * v;
             for i = 1 : self.crit.nElemts
                 hess = hess + self.crit.J{i}.prodHess(x, reshape( ...
                     self.sino.Scans{1}, [], 1), v);
             end
-            hess = real(self.Jac' * hess); % hess = C' * hess
             self.nEvalP = self.nEvalP + 2;
         end
         
-        function c = fcon_local(self, x)
+        function c = fcon_local(~, x)
             %% Computes the value of the constraints
-            % In our case the constraint is Cx >= 0
-            c = self.Jac * x;
+            % In our case the constraint is x >= 0
+            c = x;
         end
         
         function J = gcon_local(self, ~)
             %% Computes the gradient of the constraints
-            % In our case the constraint is Cx >= 0 so the jacobian is C.
-            % Note that C is symmetric.
-            J = self.Jac;
+            % In our case the constraint is x >= 0 so the jacobian is I.
+            J = speye(self.n);
         end
         
         function Hc = hcon_local(self, ~, ~)
             %% Computes the hessian of the constraints
-            % In our case the constraint is Cx >= 0 so the hessian is 0
+            % In our case the constraint is x >= 0 so the hessian is 0
             Hc = sparse(self.objSize, self.objSize);
         end
         
@@ -273,6 +271,13 @@ classdef RecModel < model.NlpModel
             elseif mode == 2
                 z = self.prec.Adjoint(z);
             end
+            z = real(z);
+            self.nEvalC = self.nEvalC + 1;
+        end
+        
+        function z = precPrectMult(self, z, ~)
+            %% Evaluates C * Ct * z
+            z = self.prec.AdjointDirect(z);
             z = real(z);
             self.nEvalC = self.nEvalC + 1;
         end
