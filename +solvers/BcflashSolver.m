@@ -30,11 +30,11 @@ classdef BcflashSolver < solvers.NlpSolver
         eta2 = 0.75;
         
         % Log header and body formats.
-        LOG_HEADER_FORMAT = '\n%5s  %13s  %13s  %5s  %9s  %9s  %6s  %9s\n';
+        LOG_HEADER_FORMAT = '\n%5s  %13s  %13s  %5s  %9s  %9s  %6s  %9s %9s\n';
         LOG_BODY_FORMAT = ['%5i  %13.6e  %13.6e  %5i  %9.3e  %9.3e', ...
-            '  %6s  %9d\n'];
+            '  %6s  %9d %9f\n'];
         LOG_HEADER = {'iter', 'f(x)', '|g(x)|', 'cg', 'preRed', ...
-            'radius', 'status', 'nFree'};
+            'radius', 'status', 'nFree', 'time'};
     end % constant properties
     
     
@@ -124,6 +124,7 @@ classdef BcflashSolver < solvers.NlpSolver
             while ~self.iStop
                 % Check stopping conditions
                 pgNorm = norm(self.gpstep(x, -1, g));
+                now = toc(self.solveTime);
                 if pgNorm <= self.rOptTol + self.aOptTol
                     self.iStop = self.EXIT_OPT_TOL;
                 elseif f < self.fMin
@@ -136,7 +137,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 elseif self.nlp.ncalls_fobj + self.nlp.ncalls_fcon >= ...
                         self.maxEval
                     self.iStop = self.EXIT_MAX_EVAL;
-                elseif toc(self.solveTime) >= self.maxRT
+                elseif now >= self.maxRT
                     self.iStop = self.EXIT_MAX_RT;
                 end
                 
@@ -144,7 +145,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 if self.verbose >= 2
                     [~, nFree] = self.getIndFree(x);
                     self.printf(self.LOG_BODY_FORMAT, self.iter, f, ...
-                        pgNorm, self.iterCg, preRed, delta, status, nFree);
+                        pgNorm, self.iterCg, preRed, delta, status, nFree, now);
                 end
                 
                 % Act on exit conditions
