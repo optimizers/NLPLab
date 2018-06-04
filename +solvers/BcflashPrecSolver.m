@@ -30,11 +30,11 @@ classdef BcflashPrecSolver < solvers.NlpSolver
         eta2 = 0.75;
         
         % Log header and body formats.
-        LOG_HEADER_FORMAT = '\n%5s  %13s  %13s  %5s  %9s  %9s  %6s  %9s\n';
+        LOG_HEADER_FORMAT = '\n%5s  %13s  %13s  %5s  %9s  %9s  %6s  %9s %9s\n';
         LOG_BODY_FORMAT = ['%5i  %13.6e  %13.6e  %5i  %9.3e  %9.3e', ...
-            '  %6s  %9d\n'];
+            '  %6s  %9d %9f\n'];
         LOG_HEADER = {'iter', 'f(x)', '|g(x)|', 'cg', 'preRed', ...
-            'radius', 'status', 'nFree'};
+            'radius', 'status', 'nFree', 'time'};
     end % constant properties
     
     
@@ -115,7 +115,7 @@ classdef BcflashPrecSolver < solvers.NlpSolver
             gNorm = norm(g);
             delta = gNorm;
             self.gNorm0 = gNorm;
-            self.rOptTol = self.aOptTol * gNorm;
+            self.rOptTol = self.rOptTol * gNorm;
             self.rFeasTol = self.aFeasTol * abs(f);
             
             % Actual and predicted reductions. Initial inf value prevents
@@ -131,6 +131,7 @@ classdef BcflashPrecSolver < solvers.NlpSolver
             while ~self.iStop
                 % Check stopping conditions
                 pgNorm = norm(self.gpstep(x, -1, g));
+                now = toc(self.solveTime);
                 if pgNorm <= self.rOptTol + self.aOptTol
                     self.iStop = self.EXIT_OPT_TOL;
                 elseif f < self.fMin
@@ -143,7 +144,7 @@ classdef BcflashPrecSolver < solvers.NlpSolver
                 elseif self.nlp.ncalls_fobj + self.nlp.ncalls_fcon >= ...
                         self.maxEval
                     self.iStop = self.EXIT_MAX_EVAL;
-                elseif toc(self.solveTime) >= self.maxRT
+                elseif now >= self.maxRT
                     self.iStop = self.EXIT_MAX_RT;
                 end
                 
@@ -151,7 +152,7 @@ classdef BcflashPrecSolver < solvers.NlpSolver
                 if self.verbose >= 2
                     [~, nFree] = self.getIndFree(x);
                     self.printf(self.LOG_BODY_FORMAT, self.iter, f, ...
-                        pgNorm, self.iterCg, preRed, delta, status, nFree);
+                        pgNorm, self.iterCg, preRed, delta, status, nFree, now);
                 end
                 
                 % Act on exit conditions
@@ -746,20 +747,21 @@ classdef BcflashPrecSolver < solvers.NlpSolver
                 % Update w and the residuals r.
                 w = w + alph * p;
                 r = r - alph * q;
+                % Compute the new preconditioned direction
+                z = CCt * r;
+                rtz = r'*z;
                 
                 % Exit if the residual convergence test is satisfied.
                 rnorm = norm(r);
                 self.logger.debug(sprintf('\t||r''*r|| = %7.3e', rnorm));
+                self.logger.debug(sprintf('\t||r''*z|| = %7.3e', rtz));
                 if rnorm <= tol
                     info = 1;
                     self.logger.debug(sprintf(['Leaving TRPCG, info', ...
                         ' = %d (conv)'], info));
                     return
                 end
-                
-                % Compute the new preconditioned direction
-                z = CCt * r;
-                rtz = r'*z;
+              
                 % Compute p = r + betaFact*p and update rho.
                 betaFact = rtz/rho;
                 p = z + betaFact*p;
