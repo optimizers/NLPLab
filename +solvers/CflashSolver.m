@@ -189,9 +189,10 @@ classdef CflashSolver < solvers.NlpSolver
                 now = toc(self.solveTime);
                 
                 % Optimality in the image space
-                gPrec = real(self.nlp.prec.Inverse(g));
+                gim = real(self.nlp.prec.Inverse(g));
                 mu = real(self.nlp.prec.Direct(x));
-                precOpt = norm(max(0, mu - gPrec) - x);
+                yy = max(mu - gim, 0);
+                precNorm = norm(yy - mu);
                 
                 if pgNorm <= self.rOptTol + self.aOptTol
                     self.iStop = self.EXIT_OPT_TOL;
@@ -215,7 +216,7 @@ classdef CflashSolver < solvers.NlpSolver
                 if self.verbose >= 2
                     self.printf(self.LOG_BODY_FORMAT, self.iter, f, ...
                         pgNorm, self.nProj, self.nEqProj, self.iterCg, ...
-                        preRed, delta, status, nFree, now, precOpt);
+                        preRed, delta, status, nFree, now, precNorm);
                 end
                 
                 % Act on exit conditions
