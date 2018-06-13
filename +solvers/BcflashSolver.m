@@ -2,7 +2,7 @@ classdef BcflashSolver < solvers.NlpSolver
     %% BcflashSolver
     
     
-    properties (SetAccess = private, Hidden = false)
+    properties (SetAccess = protected, Hidden = false)
         maxIterCg; % maximum number of CG iters per Newton step
         nSuccessIter; % number of successful iters
         iterCg; % total number of CG iters
@@ -108,8 +108,8 @@ classdef BcflashSolver < solvers.NlpSolver
             gNorm = norm(g);
             delta = gNorm;
             self.gNorm0 = gNorm;
-            self.rOptTol = self.aOptTol * gNorm;
-            self.rFeasTol = self.aFeasTol * abs(f);
+            self.rOptTol = self.rOptTol * gNorm;
+            self.rFeasTol = self.rFeasTol * abs(f);
             
             % Actual and predicted reductions. Initial inf value prevents
             % exits based on related on first iter.
@@ -235,7 +235,7 @@ classdef BcflashSolver < solvers.NlpSolver
     end % public methods
     
     
-    methods (Access = private)
+    methods (Access = protected)
         
         function delta = updateDelta(self, f, fc, g, s, actRed, preRed, ...
                 delta)
@@ -297,13 +297,16 @@ classdef BcflashSolver < solvers.NlpSolver
             interpf =  0.1;     % interpolation factor
             extrapf = 1 / interpf;     % extrapolation factor
             
+            % Compute the preconditioned descent
+            p = self.descentDirection(x, g);
+            
             % Find the minimal and maximal break-point on x - alph*g.
-            [~, ~, brptMax] = self.breakpt(x, -g);
+            [~, ~, brptMax] = self.breakpt(x, -p);
             self.logger.debug(sprintf('brptMax = %7.1e', brptMax));
             
             % Evaluate the initial alph and decide if the algorithm
             % must interpolate or extrapolate.
-            s = self.gpstep(x, -alph, g);
+            s = self.gpstep(x, -alph, p);
             sNorm = norm(s);
             self.logger.debug(sprintf('||s|| = %7.3e', sNorm));
             if sNorm >= delta
@@ -321,7 +324,7 @@ classdef BcflashSolver < solvers.NlpSolver
                     % This is a crude interpolation procedure that
                     % will be replaced in future versions of the code.
                     alph = interpf * alph;
-                    s = self.gpstep(x, -alph, g);
+                    s = self.gpstep(x, -alph, p);
                     sNorm = norm(s);
                     self.logger.debug(sprintf('\t||s|| = %7.3e', sNorm));
                     if sNorm <= delta
@@ -342,7 +345,7 @@ classdef BcflashSolver < solvers.NlpSolver
                     % This is a crude extrapolation procedure that
                     % will be replaced in future versions of the code.
                     alph = extrapf * alph;
-                    s = self.gpstep(x, -alph, g);
+                    s = self.gpstep(x, -alph, p);
                     sNorm = norm(s);
                     self.logger.debug(sprintf('\t||s|| = %7.3e', sNorm));
                     if sNorm <= delta
@@ -358,7 +361,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 end
                 % Recover the last successful step.
                 alph = alphs;
-                s = self.gpstep(x, -alph, g);
+                s = self.gpstep(x, -alph, p);
                 self.logger.debug(sprintf('Leaving Cauchy, α = %7.1e', alph));
             end
             
@@ -547,6 +550,14 @@ classdef BcflashSolver < solvers.NlpSolver
             end % faces
             self.iterCg = self.iterCg + iters;
         end % spcg
+        
+        function p = descentDirection(~, ~, g)
+            %% DescentDirection
+            %  This method returns the the gradient g of the objective
+            %  function, that is the descent direction used in the
+            %  unpreconditioned version of the algorithm
+            p = g;
+        end
         
         function [indFree, nFree] = getIndFree(self, x)
             %% GetIndFree
@@ -742,7 +753,7 @@ classdef BcflashSolver < solvers.NlpSolver
     end % hidden public methods
     
     
-    methods (Access = private, Static)
+    methods (Access = protected, Static)
         
         
         
