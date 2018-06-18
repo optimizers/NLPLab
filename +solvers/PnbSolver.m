@@ -141,8 +141,9 @@ classdef PnbSolver < solvers.NlpSolver
             fOld = Inf;
             
             % Relative stopping tolerances
-            self.rOptTol = self.aOptTol * norm(g);
-            self.rFeasTol = self.aFeasTol * abs(f);
+            self.gNorm0 = norm(g);
+            rOptTol = self.rOptTol * self.gNorm0;
+            rFeasTol = self.rFeasTol * abs(f);
             
             %% Main loop
             while ~self.iStop % self.iStop == 0
@@ -164,9 +165,9 @@ classdef PnbSolver < solvers.NlpSolver
                 % Checking various stopping conditions, exit if true
                 if ~any(working)
                     self.iStop = self.EXIT_ALL_BOUND;
-                elseif pgnrm < self.rOptTol + self.aOptTol
+                elseif pgnrm < rOptTol + self.aOptTol
                     self.iStop = self.EXIT_OPT_TOL;
-                elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
+                elseif abs(f - fOld) < rFeasTol + self.aFeasTol
                     self.iStop = self.EXIT_FEAS_TOL;
                 elseif self.nObjFunc >= self.maxEval
                     self.iStop = self.EXIT_MAX_EVAL;
@@ -286,7 +287,7 @@ classdef PnbSolver < solvers.NlpSolver
             % on the free variables.
             
             % Different methods could be used. Using PCG for now.
-            [d, ~] = pcg(H, -g, self.aOptTol + self.rOptTol, self.nlp.n);
+            [d, ~] = pcg(H, -g, self.aOptTol + self.rOptTol * self.gNorm0, self.nlp.n);
         end
         
         function d = callMinres(self, g, H)

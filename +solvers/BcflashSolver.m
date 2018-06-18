@@ -6,7 +6,6 @@ classdef BcflashSolver < solvers.NlpSolver
         maxIterCg; % maximum number of CG iters per Newton step
         nSuccessIter; % number of successful iters
         iterCg; % total number of CG iters
-        gNorm0; % norm of the gradient at x0
         mu0; % sufficient decrease parameter
         cgTol;
         fMin;

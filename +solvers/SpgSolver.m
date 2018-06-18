@@ -57,15 +57,13 @@ classdef SpgSolver < solvers.NlpSolver
     
     properties (Hidden = true, Constant)
         LOG_HEADER = { ...
-            'Iteration', 'FunEvals', 'Projections', 'Step Length', ...
-            'Function Val'};
-        LOG_FORMAT = '%10s %10s %10s %15s %15s\n';
-        LOG_BODY = '%10d %10d %10d %15.5e %15.5e\n';
+            'iter', 'f(x)', '#fEvals', '#Proj', 'Step Length'};
+        LOG_FORMAT = '%5s  %13s  %7s  %5s  %13s\n';
+        LOG_BODY = '%5d  %13.6d  %7d  %5d  %13.6e\n';
         LOG_HEADER_OPT = { ...
-            'Iteration', 'FunEvals', 'Projections', 'Step Length', ...
-            'Function Val', '||Pg||'};
-        LOG_FORMAT_OPT = '%10s %10s %10s %15s %15s %15s\n';
-        LOG_BODY_OPT = '%10d %10d %10d %15.5e %15.5e %15.5e\n';
+            'iter', 'f(x)', '||Pg||', '#fEvals', '#Proj', 'Step Length'};
+        LOG_FORMAT_OPT = '%5s  %13s  %13s  %7s  %5s  %13s\n';
+        LOG_BODY_OPT = '%5d  %13.6e  %13.6d  %7d  %5d  %13.6e\n';
     end % constant properties
     
     
@@ -153,14 +151,15 @@ classdef SpgSolver < solvers.NlpSolver
             [f, g] = self.nlp.obj(x);
             
             % Relative stopping tolerance
-            self.rOptTol = self.aOptTol * norm(g);
-            self.rFeasTol = self.aFeasTol * abs(f);
+            self.gNorm0 = norm(g);
+            rOptTol = self.rOptTol * self.gNorm0;
+            rFeasTol = self.rFeasTol * abs(f);
             
             % Optionally check optimality
             pgnrm = 0;
             if self.testOpt
                 pgnrm = norm(self.gpstep(x, g));
-                if pgnrm < self.rOptTol + self.aOptTol
+                if pgnrm < rOptTol + self.aOptTol
                     self.iStop = 1; % will bypass main loop
                 end
             end
@@ -248,7 +247,7 @@ classdef SpgSolver < solvers.NlpSolver
                         self.nObjFunc = self.nlp.ncalls_fobj + ...
                             self.nlp.ncalls_fcon;
                         fprintf(self.LOG_BODY_OPT, self.iter, ...
-                            self.nObjFunc, self.nProj, t, f, pgnrm);
+                            f, pgnrm, self.nObjFunc, self.nProj, t);
                     end
                 else
                     % Output Log without opt. cond.
@@ -256,20 +255,20 @@ classdef SpgSolver < solvers.NlpSolver
                         self.nObjFunc = self.nlp.ncalls_fobj + ...
                             self.nlp.ncalls_fcon;
                         fprintf(self.LOG_BODY, self.iter, ...
-                            self.nObjFunc, self.nProj, t, f);
+                            f, self.nObjFunc, self.nProj, t);
                     end
                 end
                 
                 % Check optimality
                 if self.testOpt
-                    if pgnrm < self.rOptTol + self.aOptTol
+                    if pgnrm < rOptTol + self.aOptTol
                         self.iStop = self.EXIT_OPT_TOL;
                     end
                 end
                 if max(abs(t * d)) < self.aFeasTol * norm(d) + ...
                         self.aFeasTol
                     self.iStop = self.EXIT_DIR_DERIV;
-                elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
+                elseif abs(f - fOld) < rFeasTol + self.aFeasTol
                     self.iStop = self.EXIT_FEAS_TOL;
                 elseif self.nObjFunc > self.maxEval
                     self.iStop = self.EXIT_MAX_EVAL;

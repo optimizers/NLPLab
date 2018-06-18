@@ -30,7 +30,6 @@ classdef CflashSolver < solvers.NlpSolver
         maxIterCg; % maximum number of CG iterations per Newton step
         nSuccessIter; % number of successful iterations
         iterCg; % total number of CG iterations
-        gNorm0; % norm of the gradient at x0
         mu0; % sufficient decrease parameter
         cgTol;
         fMin;
@@ -159,8 +158,8 @@ classdef CflashSolver < solvers.NlpSolver
             gNorm = norm(g);
             delta = gNorm;
             self.gNorm0 = gNorm;
-            self.rOptTol = self.rOptTol * gNorm;
-            self.rFeasTol = self.aFeasTol * abs(f);
+            rOptTol = self.rOptTol * gNorm;
+            rFeasTol = self.rFeasTol * abs(f);
             
             if self.verbose >= 2
                 extra = containers.Map( ...
@@ -194,12 +193,12 @@ classdef CflashSolver < solvers.NlpSolver
                 yy = max(mu - gim, 0);
                 precNorm = norm(yy - mu);
                 
-                if pgNorm <= self.rOptTol + self.aOptTol
+                if pgNorm <= rOptTol + self.aOptTol
                     self.iStop = self.EXIT_OPT_TOL;
                 elseif f < self.fMin
                     self.iStop = self.EXIT_UNBOUNDED;
-                elseif (abs(actRed) <= (self.aFeasTol + self.rFeasTol)) ...
-                        && (preRed  <= (self.aFeasTol + self.rFeasTol))
+                elseif (abs(actRed) <= (self.aFeasTol + rFeasTol)) ...
+                        && (preRed  <= (self.aFeasTol + rFeasTol))
                     self.iStop = self.EXIT_FEAS_TOL;
                 elseif self.iter >= self.maxIter
                     self.iStop = self.EXIT_MAX_ITER;

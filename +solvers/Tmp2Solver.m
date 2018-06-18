@@ -213,8 +213,9 @@ classdef Tmp2Solver < solvers.NlpSolver
             [f, g, H] = self.nlp.obj(x);
             
             % Relative stopping tolerance
-            self.rOptTol = self.aOptTol * norm(g);
-            self.rFeasTol = self.aFeasTol * abs(f);
+            self.gNorm0 = norm(g);
+            rOptTol = self.rOptTol * self.gNorm0;
+            rFeasTol = self.rFeasTol * abs(f);
             
             fOld = inf;
             gtd = inf;
@@ -239,10 +240,10 @@ classdef Tmp2Solver < solvers.NlpSolver
                 % Checking various stopping conditions, exit if true
                 if isempty(working)
                     self.iStop = self.EXIT_ALL_BOUND;
-                elseif pgnrm <= self.rOptTol + self.aOptTol
+                elseif pgnrm <= rOptTol + self.aOptTol
                     self.iStop = self.EXIT_OPT_TOL;
                     % Check for lack of progress
-                elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
+                elseif abs(f - fOld) < rFeasTol + self.aFeasTol
                     self.iStop = self.EXIT_FEAS_TOL;
                 elseif self.nObjFunc > self.maxEval
                     self.iStop = self.EXIT_MAX_EVAL;
@@ -263,7 +264,7 @@ classdef Tmp2Solver < solvers.NlpSolver
                 
                 % Check that progress can be made along the direction
                 gtd = g' * d;
-                if gtd > -self.aOptTol * norm(g) * norm(d) - self.aOptTol
+                if gtd > -self.rOptTol * norm(g) * norm(d) - self.aOptTol
                     self.iStop = self.EXIT_DIR_DERIV;
                     % Leave now
                     break;
@@ -334,7 +335,7 @@ classdef Tmp2Solver < solvers.NlpSolver
             
             % Different methods could be used. Using PCG for now.
             [d, ~, ~] = pcg(H(working, working), -g(working), ...
-                self.aOptTol + self.rOptTol, self.nlp.n);
+                self.aOptTol + self.rOptTol*self.gNorm0, self.nlp.n);
         end
         
         function d = callMinres(self, g, H, working)
