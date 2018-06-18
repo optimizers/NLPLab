@@ -58,6 +58,7 @@ classdef iNewtonSolver < solvers.UnconstrainedSolver
       H = nlp.hobj(x);
 
       gNorm = norm(g);
+      self.gNorm0 = gNorm;
       tol = self.opt_atol + self.opt_rtol * gNorm;
       iter_history(self.iter + 1, :) = [gNorm, f, 0, 0, 0];
 

@@ -187,8 +187,9 @@ classdef TmpSolver < solvers.NlpSolver
             end
             
             % Relative stopping tolerance
-            self.rOptTol = self.aOptTol * norm(g);
-            self.rFeasTol = self.aFeasTol * abs(f);
+            self.gNorm0 = norm(g);
+            rOptTol = self.rOptTol * self.gNorm0;
+            rFeasTol = self.rFeasTol * abs(f);
             
             % Compute working set (inactive constraints)
             working = self.working(x, g);
@@ -276,7 +277,7 @@ classdef TmpSolver < solvers.NlpSolver
                 
                 % Check that progress can be made along the direction
                 gtd = g' * d;
-                if gtd > -self.aOptTol * norm(g) * norm(d) - self.aOptTol
+                if gtd > -self.rOptTol * norm(g) * norm(d) - self.aOptTol
                     self.iStop = self.EXIT_DIR_DERIV;
                     % Leave now
                     break;
@@ -325,13 +326,13 @@ classdef TmpSolver < solvers.NlpSolver
                 % Checking various stopping conditions, exit if true
                 if isempty(working)
                     self.iStop = self.EXIT_ALL_BOUND;
-                elseif pgnrm <= self.rOptTol + self.aOptTol
+                elseif pgnrm <= rOptTol + self.aOptTol
                     self.iStop = self.EXIT_OPT_TOL;
                     % Check for lack of progress
                 elseif sum(abs(t * d)) < self.aOptTol * norm(d) + ...
                         self.aOptTol
                     self.iStop = self.EXIT_DIR_DERIV;
-                elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
+                elseif abs(f - fOld) < rFeasTol + self.aFeasTol
                     self.iStop = self.EXIT_FEAS_TOL;
                 elseif self.nObjFunc > self.maxEval
                     self.iStop = self.EXIT_MAX_EVAL;

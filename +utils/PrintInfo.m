@@ -22,7 +22,8 @@ classdef PrintInfo < handle
                     self.solverName, solver.EXIT_MSG{solver.iStop}, ...
                     solver.solved);
                 solver.printf('||Pg|| = %8.1e\n', solver.pgNorm);
-                solver.printf('Stop tolerance = %8.1e\n', solver.rOptTol);
+                solver.printf('Stop tolerance = %8.1e\n', ...
+                    solver.rOptTol * solver.gNorm0 + solver.aOptTol);
                 solver.printf('\n')
             end
             

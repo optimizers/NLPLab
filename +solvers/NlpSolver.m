@@ -16,6 +16,10 @@ classdef NlpSolver < handle
         maxRT;      % Maximum run time
     end % gettable private properties
     
+    properties (SetAccess = protected, Hidden = false)
+        gNorm0;     % Norm of the gradient at x0
+    end
+    
     properties (Access = public)
         x;          % current point upon termination
         fx;         % objective function value at x
@@ -24,14 +28,14 @@ classdef NlpSolver < handle
         rOptTol;    % relative stopping tolerance on optimality
         rFeasTol;   % relative stopping tolerance on feasibility
         rCompTol;   % relative stopping tolerance on complementarity
-        solved;      % bool flag that indicates if problem has been solved
-        nObjFunc; % # of obj func calls
-        nGrad; % # of gradient calls
-        nHess; % # of hessian calls
+        solved;     % bool flag that indicates if problem has been solved
+        nObjFunc;   % # of obj func calls
+        nGrad;      % # of gradient calls
+        nHess;      % # of hessian calls
         solveTime;  % cpu time to complete the solve
-        status;      % status after solve
-        iter;        % current iteration count
-        logger;      % logger object
+        status;     % status after solve
+        iter;       % current iteration count
+        logger;     % logger object
     end
     
     properties (Constant, Hidden = true)

@@ -80,8 +80,9 @@ classdef PnBcgSolver < solvers.NlpSolver
             fOld = Inf;
             
             % Relative stopping tolerance
-            self.rOptTol = self.aOptTol * norm(g);
-            self.rFeasTol = self.aFeasTol * abs(f);
+            self.gNorm0 = norm(g);
+            rOptTol = self.rOptTol * norm(g);
+            rFeasTol = self.rFeasTol * abs(f);
             
             %% Main loop
             while ~self.iStop % self.iStop == 0
@@ -98,9 +99,9 @@ classdef PnBcgSolver < solvers.NlpSolver
                 end
                 
                 % Checking various stopping conditions, exit if true
-                if pgnrm < self.rOptTol + self.aOptTol
+                if pgnrm < rOptTol + self.aOptTol
                     self.iStop = self.EXIT_OPT_TOL;
-                elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
+                elseif abs(f - fOld) < rFeasTol + self.aFeasTol
                     self.iStop = self.EXIT_FEAS_TOL;
                 elseif self.nObjFunc >= self.maxEval
                     self.iStop = self.EXIT_MAX_EVAL;

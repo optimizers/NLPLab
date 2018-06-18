@@ -190,12 +190,13 @@ classdef PqnSolver < solvers.NlpSolver
             fOld = -inf;
             
             % Relative stopping tolerance
-            self.rOptTol = self.aOptTol * norm(g);
-            self.rFeasTol = self.aFeasTol * abs(f);
+            self.gNorm0 = norm(g);
+            rOptTol = self.rOptTol * self.gNorm0;
+            rFeasTol = self.rFeasTol * abs(f);
             
             pgnrm = norm(self.gpstep(x, g));
             % Check Optimality of Initial Point
-            if pgnrm < self.rOptTol + self.aOptTol
+            if pgnrm < rOptTol + self.aOptTol
                 self.iStop = 1; % will bypass main loop
             end
             
@@ -292,12 +293,12 @@ classdef PqnSolver < solvers.NlpSolver
                     self.nProj, self.spgIter, pgnrm, toc(self.solveTime)]];
                 
                 % Check optimality conditions
-                if pgnrm < self.rOptTol + self.aOptTol
+                if pgnrm < rOptTol + self.aOptTol
                     self.iStop = self.EXIT_OPT_TOL;
                 elseif max(abs(t * d)) < self.aFeasTol * norm(d) + ...
                         self.aFeasTol
                     self.iStop = self.EXIT_DIR_DERIV;
-                elseif abs(f - fOld) < self.rFeasTol + self.aFeasTol
+                elseif abs(f - fOld) < rFeasTol + self.aFeasTol
                     self.iStop = self.EXIT_FEAS_TOL;
                 elseif self.nObjFunc > self.maxEval
                     self.iStop = self.EXIT_MAX_EVAL;
