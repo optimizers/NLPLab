@@ -1,6 +1,10 @@
 classdef BcflashSolver < solvers.NlpSolver
     %% BcflashSolver
-    
+    %  TRON algorithm for bounded problems
+    %  This code is an adaptation of the bcflash.m project.
+    %
+    %  The supplied model must be a subclass of NLPModel corresponding to a
+    %  bounded model.
     
     properties (SetAccess = protected, Hidden = false)
         maxIterCg; % maximum number of CG iters per Newton step

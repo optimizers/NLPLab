@@ -1,6 +1,27 @@
 classdef BcflashPrecSolver < solvers.BcflashSolver
     %% BcflashPrecSolver
     %  Extention of BcflashSolver for the use of a preconditioner
+    %  The method propose a version of the TRON algorithm where the
+    %  descent directions for the cauchy point and the conjugate gradient
+    %  are transformed through the use of a preconditioner.
+    %
+    %  The model must contain a property named
+    %
+    %        * M,
+    %
+    %  that is a matrix or an opSpot operator corresponding to an
+    %  approximation of the inverse hessian.
+    %  
+    %  If p is the unpreconditioned direction (e.g. the opposite of the
+    %  gradient), the preconditioned direction is
+    %  
+    %        d = M * p
+    %
+    %  This algorithm also has embedded logging, through the use of the
+    %  loggin4matlab package, available at
+    %  https://github.com/optimizers/logging4matlab
+    %  The repository should be located under the parent repository of the
+    %  current folder.
 
     methods (Access = public)
         
@@ -8,10 +29,8 @@ classdef BcflashPrecSolver < solvers.BcflashSolver
             %% Constructor
             
             % Check if the model has the required properties
-            if ~isprop(nlp, 'C')
-                error('No C operator in the model');
-            elseif ~isprop(nlp, 'CCt')
-                error('No CCt operator in the model');
+            if ~isprop(nlp, 'M')
+                error('The model must containt a M operator');
             end
             
             self = self@solvers.BcflashSolver(nlp, varargin{:});
@@ -104,8 +123,8 @@ classdef BcflashPrecSolver < solvers.BcflashSolver
                 gQuad = Hs(indFree) + wa;
                 
                 % Reduced preconditioned direction
-                CCtfree = self.nlp.CCt(indFree, indFree);
-                ptw = wa.' * CCtfree * wa;
+                Mfree = self.nlp.M(indFree, indFree);
+                ptw = wa.' * Mfree * wa;
                 
                 % Solve the trust region subproblem in the free variables
                 % to generate a direction p[k]. Store p[k] in the array w.
@@ -115,7 +134,7 @@ classdef BcflashPrecSolver < solvers.BcflashSolver
                 
                 
                 [w, iterTR, infoTR] = self.trpcg( ...
-                    Hfree, gQuad, CCtfree, delta, tol, self.maxIterCg, s(indFree));
+                    Hfree, gQuad, Mfree, delta, tol, self.maxIterCg, s(indFree));
                 iters = iters + iterTR;
                 
                 % Use a projected search to obtain the next iterate.
@@ -131,7 +150,7 @@ classdef BcflashPrecSolver < solvers.BcflashSolver
                 % Compute A*(x[k+1] - x[0]) and store in w.
                 Hs = H * s;
                 newwa = (wa + Hs(indFree));
-                normWa = newwa.' * CCtfree * newwa;
+                normWa = newwa.' * Mfree * newwa;
                 
                 
                 % Convergence and termination test.
@@ -163,14 +182,14 @@ classdef BcflashPrecSolver < solvers.BcflashSolver
             %  The set is represents the constraints that are violated by
             %  an arbitrarily small step in  the direction -g.
             %  The use of projections is equivalent to remove some rows and
-            %  columns to the matrix CCt
+            %  columns to the matrix M
             
             Iplus = ((self.nlp.bU == x) & (g < 0) |...
                 (x == self.nlp.bL) & (g > 0));
             
             p = g;
             p(Iplus) = 0;
-            p = self.nlp.CCt*p;
+            p = self.nlp.M * p;
             p(Iplus) = 0;
         end
         
