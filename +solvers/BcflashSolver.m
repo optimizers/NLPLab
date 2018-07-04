@@ -111,8 +111,8 @@ classdef BcflashSolver < solvers.NlpSolver
             gNorm = norm(g);
             delta = gNorm;
             self.gNorm0 = gNorm;
-            self.rOptTol = self.rOptTol * gNorm;
-            self.rFeasTol = self.rFeasTol * abs(f);
+            rOptTol = self.rOptTol * gNorm;
+            rFeasTol = self.rFeasTol * abs(f);
             
             % Actual and predicted reductions. Initial inf value prevents
             % exits based on related on first iter.
@@ -128,12 +128,12 @@ classdef BcflashSolver < solvers.NlpSolver
                 % Check stopping conditions
                 pgNorm = norm(self.gpstep(x, -1, g));
                 now = toc(self.solveTime);
-                if pgNorm <= self.rOptTol + self.aOptTol
+                if pgNorm <= rOptTol + self.aOptTol
                     self.iStop = self.EXIT_OPT_TOL;
                 elseif f < self.fMin
                     self.iStop = self.EXIT_UNBOUNDED;
-                elseif (abs(actRed) <= (self.aFeasTol + self.rFeasTol)) ...
-                        && (preRed  <= (self.aFeasTol + self.rFeasTol))
+                elseif (abs(actRed) <= (self.aFeasTol + rFeasTol)) ...
+                        && (preRed  <= (self.aFeasTol + rFeasTol))
                     self.iStop = self.EXIT_FEAS_TOL;
                 elseif self.iter >= self.maxIter
                     self.iStop = self.EXIT_MAX_ITER;
