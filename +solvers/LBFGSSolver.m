@@ -14,20 +14,28 @@ classdef LBFGSSolver < solvers.NlpSolver
         gSuffDec;
         maxIterLS;
         
-        % L-BFGS operator
-        B; % opSpot on the pseudo hessian
+        % L-BFGS data
+        LbfgsMem;  % Size of the LBFGS history
+        LbfgsUpdates; % Number of updates
+        LbfgsRejects; % Number of rejected pairs
+    end
+    
+    properties (SetAccess = protected, Hidden = true)
+        % Parts of the L-BFGS operator
+        
+        beg;        % First index of stored pairs
+        s;        % Array of s vectors
+        y;        % Array of y vectors
+        theta;    % Scaling parameter
+        l;        % Matrix of the YtS
+        sts;      % Matrix of the StS
+        J;        % cholesky factorization of the middle matrix
+        dd;       % Diagonal of the D matrix containing the ys
+        sqrtdd    % Square root of dd
+        LD;       %  L * D^(-1/2)
     end
     
     properties (Hidden = true, Constant)
-        % Constants used to manipulate the TR radius. These are the numbers
-        % used by TRON.
-        sig1 = 0.25;
-        sig2 = 0.50;
-        sig3 = 4.00;
-        eta0 = 1e-4;
-        eta1 = 0.25;
-        eta2 = 0.75;
-        
         % Log header and body formats.
         LOG_HEADER_FORMAT = '\n%5s  %13s  %13s  %5s  %6s  %9s %9s\n';
         LOG_BODY_FORMAT = ['%5i  %13.6e  %13.6e  %5i', ...
@@ -53,24 +61,24 @@ classdef LBFGSSolver < solvers.NlpSolver
             p.addParameter('maxIterLS', 10);
             p.addParameter('fSuffDec', 1e-4);
             p.addParameter('gSuffDec', .5);
-            p.addParameter('LbfgsPairs', 29);
+            p.addParameter('LbfgsMem', 29);
             
             p.parse(varargin{:});
             
             self = self@solvers.NlpSolver(nlp, p.Unmatched);
             
             % Store various objects and parameters
-            self.cgTol = p.Results.cgTol;
+            self.cgTol     = p.Results.cgTol;
             self.maxIterCg = p.Results.maxIterCg;
-            self.fMin = p.Results.fMin;
-            self.fid = p.Results.fid;
-            self.fSuffDec = p.Results.fSuffDec;
-            self.gSuffDec = p.Results.gSuffDec;
+            self.fMin      = p.Results.fMin;
+            self.fid       = p.Results.fid;
+            self.fSuffDec  = p.Results.fSuffDec;
+            self.gSuffDec  = p.Results.gSuffDec;
             self.maxIterLS = p.Results.maxIterLS;
+            self.LbfgsMem  = p.Results.LbfgsMem;
             
             % Initialize the L-BFGS operator
-            import utils.opLBFGSB;
-            self.B = opLBFGSB(self.nlp.n, p.Results.LbfgsPairs);
+            self.initLBFGS();
             
             import utils.PrintInfo;
         end % constructor
@@ -154,13 +162,14 @@ classdef LBFGSSolver < solvers.NlpSolver
                 [xc, c, indFree] = self.cauchy(x, g);
                 
                 % Subspace minimization
-                [d, ~, ~] = self.subspaceMinimization(x, g, xc, c, indFree);
+                [d, cgit, ~] = self.subspaceMinimization(x, g, xc, c, indFree);
+                self.iterCg = self.iterCg + cgit;
                 
                 % Line search
                 [x, f, g] = strongWolfe(self, x, f, g, d);                
                 
                 % Update L-BFGS operator
-                self.B = update(self.B, x - xOld, g - gOld);
+                self.updateLBFGS(x - xOld, g - gOld);
                 
                 self.iter = self.iter + 1;
             end % main loop
@@ -197,7 +206,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             % Find the free variables
             indFree = (self.nlp.bL < x) & (x < self.nlp.bU);
             if nargout > 1
-                nFree = sum(indFree);
+                nFree = nnz(indFree);
             end
         end
 
@@ -215,7 +224,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             end
         end
         
-        function breakpoints = brkpt(self, x, w, ind)
+        function breakpoints = brkpt(self, x, w, ind, nFree)
             %% BreakPt - Compute breakpoints along a search path
             %  Return the breakpoints for each coordinate on the piecewise
             %  affine path
@@ -239,9 +248,11 @@ classdef LBFGSSolver < solvers.NlpSolver
             if nargin > 3
                 bU = self.nlp.bU(ind);
                 bL = self.nlp.bL(ind);
+                breakpoints = inf(nFree, 1);
             else
                 bU = self.nlp.bU;
                 bL = self.nlp.bL;
+                breakpoints = inf(self.nlp.n, 1);
             end
             
             % Compute gradient sign
@@ -249,7 +260,6 @@ classdef LBFGSSolver < solvers.NlpSolver
             dec = w < 0;
             
             % Compute breakpoint for each coordinate
-            breakpoints= inf(self.nlp.n, 1);
             breakpoints(inc) = ( bU(inc) - x(inc) ) ./ w(inc);
             breakpoints(dec) = ( bL(dec) - x(dec) ) ./ w(dec);
             breakpoints = max(breakpoints, 0);
@@ -323,12 +333,12 @@ classdef LBFGSSolver < solvers.NlpSolver
             iter = 1;
             
             % Starting point for the subspace minimization
-            p = Wtimes(self.B, d, 2); % p = Wt*d
+            p = self.Wtimes(d, 2); % p = Wt*d
             c = zeros(size(p));
             
             % Function derivatives
             fp  = -(d.' * d);
-            fpp = -self.B.theta * fp - p.' * Mtimes(self.B, p);
+            fpp = -self.theta * fp - p.' * self.Mtimes(p);
             
             % Function minimum on the segment
             deltaTMin = -fp / fpp;
@@ -363,13 +373,15 @@ classdef LBFGSSolver < solvers.NlpSolver
                 
                 % Update directional derivatives
                 zb = xc(b) - x(b);
-                wbt = Wb(self.B, b);
+                wbt = [self.y(b, self.beg:end), ...
+                    self.theta * self.s(b, self.beg:end)];
                 gb2 = g(b)^2;
-                fp = fp + deltaT * fpp + gb2 + self.B.theta * g(b) * zb ...
-                    - g(b) * ( wbt * Mtimes(self.B, c, 1) );
-                fpp = fpp - self.B.theta * gb2 ...
-                    - 2 * g(b) * ( wbt * Mtimes(self.B, p, 1) ) ...
-                    - gb2 * ( wbt * Mtimes(self.B, wbt.', 1) );
+                
+                fp = fp + deltaT * fpp + gb2 + self.theta * g(b) * zb ...
+                    - g(b) * ( wbt * self.Mtimes(c) );
+                fpp = fpp - self.theta * gb2 ...
+                    - 2 * g(b) * ( wbt * self.Mtimes(p) ) ...
+                    - gb2 * ( wbt * self.Mtimes(wbt.') );
                 
                 % Update searching direction
                 p = p + g(b) * wbt.';
@@ -391,6 +403,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             c = c + deltaTMin * p;
             
             self.logger.debug( sprintf('Iterations : %d', iter) );
+            self.logger.debug( sprintf('nFree      : %d', sum(indFree) ));
             self.logger.debug('-- Leaving Cauchy --');
         end
 
@@ -407,18 +420,16 @@ classdef LBFGSSolver < solvers.NlpSolver
             
             self.logger.debug('-- Entering Subspace minimization --');
             
-            iterMax = self.nlp.n;
+            nFree = nnz(indFree);
+            iterMax = nFree;
             iter = 0;
             
             % Initialize residual and descent direction
-            r = g + self.B.theta * (x - xc) ...
-                - Wtimes(self.B, Mtimes(self.B, c, 1), 1);
+            r = g + self.theta * (x - xc) ...
+                - self.Wtimes(self.Mtimes(c), 1);
             r = r(indFree);
             normRc = norm(r);
-            self.logger.debug(sprintf('||rc|| = %9.3e', normRc))
-            
-            % Reduced hessian
-            BHat = self.B(indFree, indFree);
+            self.logger.debug(sprintf('||rc|| = %9.3e', normRc));
             
             p = -r;
             d = zeros(length(r),1);
@@ -441,10 +452,10 @@ classdef LBFGSSolver < solvers.NlpSolver
                 end
                     
                 % Compute the minimal breakpoint
-                alf1 = min( self.brkpt(xc(indFree) + d, p, indFree) );
+                alf1 = min( self.brkpt(xc(indFree) + d, p, indFree, nFree) );
                 
                 % Compute step length
-                q = BHat * p;
+                q = self.Btimes(p, indFree);
                 alf2 = rho2 / (p.' * q);
                 
                 % Exit if we hit the domain boundary
@@ -492,7 +503,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             self.logger.debug(sprintf('Initial step = %7.1e', stp));
             
             % Call More and Thuente line search
-            [x, f, g, ~, ~, ~, ~, ~] = cvsrch( ...
+            [x, f, g, ~, ~, ~] = cvsrch( ...
                 @self.objParamsWrapper, ... Objective wrapper
                 x, [], f, g, ... Objective value at x
                 d, stp, dginit, ... Search direction and recommended step
@@ -512,7 +523,132 @@ classdef LBFGSSolver < solvers.NlpSolver
             params = [];
         end
             
+        function initLBFGS(self)
+            %% InitLBFGS - Init the LBFGS Matrix
+            %  This subroutine is called in the constructor to allocate
+            %  memory for the limited memory BFGS operator.
+            
+            % Initialize parameters
+            self.LbfgsUpdates = 0;
+            self.LbfgsRejects = 0;
+            self.beg = self.LbfgsMem + 1;
+            self.theta = 1;
+            
+            % Initialize arrays
+            self.s = zeros(self.nlp.n, self.LbfgsMem);
+            self.y = zeros(self.nlp.n, self.LbfgsMem);
+            self.l = zeros(self.LbfgsMem);
+            self.dd = zeros(self.LbfgsMem, 1);
+            self.sqrtdd = zeros(self.LbfgsMem, 1);
+            self.sts = zeros(self.LbfgsMem);
+            self.J = [];
+            self.LD = [];
+        end
         
+        function updateLBFGS(self, s, y)
+            %% UpdateLBFGS - Add a new pair to the pseudohessian
+            % Store the new pair {y, s} into the L-BFGS approximation
+            % Discard the oldest pair if memory has been exceeded
+            % The matrices D, L, StS and J are also updated
+            
+            self.LbfgsUpdates = self.LbfgsUpdates + 1;
+            ys = dot(y, s);
+            
+            if ys <= eps * dot(y, y)
+                warning('L-BFGS: Rejecting {s, y} pair');
+                self.LbfgsRejects = self.LbfgsRejects + 1;
+            else
+                % Update S and Y
+                self.s = [self.s(:, 2:end), s];
+                self.theta = (y' * y) / ys;
+                self.y = [self.y(:, 2:end), y];
+                    
+                if self.beg > 1
+                    self.beg = self.beg - 1;
+                end
+                
+                % Update D
+                self.dd = [self.dd(2:end); ys];
+                self.sqrtdd = [self.sqrtdd(2:end); sqrt(ys)];
+                
+                % Update StS
+                v = self.s.' * s; % If prec self.s = B0 * S
+                self.sts = [self.sts(2:end, 2:end), v(1:(end-1)) ; v.'];
+                
+                % Update L
+                v = s.' * self.y(:, 1:(end-1));
+                self.l = [self.l(2:end, 2:end), zeros(self.LbfgsMem-1,1); ...
+                    v, 0];
+                
+                % Update J and LD (forming the middle matrix)
+                nPairs = self.LbfgsMem - self.beg + 1;
+                L = self.l(self.beg:end, self.beg:end);
+                D = spdiags(self.dd(self.beg:end), nPairs, nPairs);
+                sqD = spdiags(self.sqrtdd(self.beg:end), nPairs, nPairs);
+                self.J = chol(self.theta * self.sts(self.beg:end, self.beg:end) ...
+                    + L * (D \ L.'), ...
+                    'lower');
+                self.LD = sqD \ L;
+            end
+        end
+        
+        function p = Wtimes(self, v, mode, ind)
+            %% WTimes - Apply the W matrix
+            %  Compute the product by W = [Y, theta * S];
+            %
+            %  mode = 1: Direct product
+            %  v is of size 2*nPairs
+            %
+            %  mode = 2: Adjoint product
+            %  v is of size n
+            if nargin < 4
+                if mode == 1 % Direct product
+                    nPairs = self.LbfgsMem - self.beg + 1;
+                    p = self.y(:, self.beg:end) * v(1:nPairs) ...
+                        + self.theta * self.s(:, self.beg:end) ...
+                        * v((nPairs+1):(2*nPairs), :);
+                elseif mode == 2
+                    p = [self.y(:, self.beg:end).' * v; ...
+                        self.theta * self.s(:, self.beg:end).' * v];
+                end
+            else % Reduced vectors
+                if mode == 1 % Direct product
+                    nPairs = self.LbfgsMem - self.beg + 1;
+                    p = self.y(ind, self.beg:end) * v(1:nPairs) ...
+                        + self.theta * self.s(ind, self.beg:end) ...
+                        * v((nPairs+1):(2*nPairs), :);
+                elseif mode == 2
+                    p = [self.y(ind, self.beg:end).' * v; ...
+                        self.theta * self.s(ind, self.beg:end).' * v];
+                end
+            end
+        end
+        
+        function p = Mtimes(self, v)
+            %% MTimes - Apply the M matrix
+            %  Compute the product with the middle matrix of the L-BFGS
+            %  formula
+            nPairs = self.LbfgsMem - self.beg + 1;
+            sqrtD = spdiags( self.sqrtdd(self.beg:end), 0, nPairs, nPairs );
+            
+            p = [sqrtD, zeros(nPairs) ; -self.LD, self.J] \ v;
+            p = [-sqrtD, self.LD.' ; zeros(nPairs), self.J.'] \ p;
+        end
+        
+        function p = Btimes(self, v, ind)
+            %% BTimes - Apply the pseudohessian
+            %  Compute the product by the L-BFGS hessian approximation
+            if nargin < 3
+                p = self.Wtimes(v, 2);
+                p = self.Mtimes(p);
+                p = self.theta * v - self.Wtimes(p, 1);
+            else % Reduced vectors
+                p = self.Wtimes(v, 2, ind);
+                p = self.Mtimes(p);
+                p = self.theta * v - self.Wtimes(p, 1, ind);
+            end
+        end
+                
     end % private methods
     
     
@@ -523,10 +659,5 @@ classdef LBFGSSolver < solvers.NlpSolver
         end
         
     end % hidden public methods
-    
-    
-    methods (Access = protected, Static)
-        
-    end % private static methods
     
 end % class
