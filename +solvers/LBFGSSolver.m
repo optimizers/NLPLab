@@ -32,18 +32,20 @@ classdef LBFGSSolver < solvers.NlpSolver
         J;        % cholesky factorization of the middle matrix
         dd;       % Diagonal of the D matrix containing the ys
         iReject;  % Number of successive step rejections
+        
+        xmem;     % a supprimer
     end
     
     properties (Hidden = true, Constant)
         % Minimal accepted condition number
-        MINRCOND = 100 * eps;
+        MINRCOND = eps;
         
         % Log header and body formats.
-        LOG_HEADER_FORMAT = '\n%5s  %13s  %13s  %5s  %6s  %9s %9s\n';
-        LOG_BODY_FORMAT = ['%5i  %13.6e  %13.6e  %5i', ...
-            '  %6s  %9d %9f\n'];
-        LOG_HEADER = {'iter', 'f(x)', '|g(x)|', 'cg', ...
-            'status', 'nFree', 'time'};
+        LOG_HEADER_FORMAT = '\n%5s  %13s  %13s  %13s  %4s  %5s  %9s  %4s  %9s\n';
+        LOG_BODY_FORMAT = ['%5i  %13.6e  %13.6e  %13.6e  %4i  %5i', ...
+            '  %9d  %4d  %9f\n'];
+        LOG_HEADER = {'iter', 'f(x)', 'RelDec', '|g(x)|', 'cgit', 'cginf', ...
+            'nFree', 'LSit',  'time'};
     end % constant properties
     
     
@@ -77,7 +79,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             self.fSuffDec  = p.Results.fSuffDec;
             self.gSuffDec  = p.Results.gSuffDec;
             self.maxIterLS = p.Results.maxIterLS;
-            self.LbfgsMem  = p.Results.LbfgsMem;
+            self.LbfgsMem  = min(p.Results.LbfgsMem, self.nlp.n);
             
             % Initialize the L-BFGS operator
             self.initLBFGS();
@@ -90,7 +92,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             
             self.solveTime = tic;
             self.iter = 1;
-            self.iterCg = 1;
+            self.iterCg = 0;
             self.iStop = self.EXIT_NONE;
             self.nlp.resetCounters();
             
@@ -102,9 +104,10 @@ classdef LBFGSSolver < solvers.NlpSolver
                 printObj.header(self, extra);
                 self.printf(self.LOG_HEADER_FORMAT, self.LOG_HEADER{:});
             end
-            
+                
             % Make sure initial point is feasible
             x = self.project(self.nlp.x0);
+            self.xmem{1} = x;
             
             % First objective and gradient evaluation.
             [f, g] = self.nlp.obj(x);
@@ -113,26 +116,31 @@ classdef LBFGSSolver < solvers.NlpSolver
             gNorm = norm(g, inf);
             self.gNorm0 = gNorm;
             rOptTol = self.rOptTol * gNorm;
-            rFeasTol = self.rFeasTol * abs(f);
             
             % Actual and predicted reductions. Initial inf value prevents
             % exits based on related on first iter.
             actRed = inf;
+            fOld = NaN;
             
             % Miscellaneous iter
-            status = '';
+            LSiter = 0;
             LSfailed = false;
+            cgout = NaN;
             
             %% Main loop
             while ~self.iStop
+                
+                self.xmem{self.iter} = x;
+                
                 % Check stopping conditions
                 pgNorm = norm(self.gpstep(x, -1, g), inf);
                 now = toc(self.solveTime);
+                relRed = actRed / max([abs([fOld, f]), 1]);
                 if pgNorm <= rOptTol + self.aOptTol
                     self.iStop = self.EXIT_OPT_TOL;
                 elseif f < self.fMin
                     self.iStop = self.EXIT_UNBOUNDED;
-                elseif (abs(actRed) <= (self.aFeasTol + rFeasTol))
+                elseif actRed <= self.aFeasTol || relRed <= self.rFeasTol
                     self.iStop = self.EXIT_FEAS_TOL;
                 elseif self.iter >= self.maxIter
                     self.iStop = self.EXIT_MAX_ITER;
@@ -148,8 +156,9 @@ classdef LBFGSSolver < solvers.NlpSolver
                 % Print current iter to log
                 if self.verbose >= 2
                     [~, nFree] = self.getIndFree(x);
-                    self.printf(self.LOG_BODY_FORMAT, self.iter, f, ...
-                        pgNorm, self.iterCg, status, nFree, now);
+                    self.printf(self.LOG_BODY_FORMAT, self.iter, f, relRed, ...
+                        pgNorm, self.iterCg, cgout, nFree, ...
+                        LSiter, now);
                 end
                 
                 % Act on exit conditions
@@ -162,6 +171,7 @@ classdef LBFGSSolver < solvers.NlpSolver
                 
                 gOld = g;
                 xOld = x;
+                fOld = f;
                 
                 % Cauchy step
                 [xc, c, indFree, nFree, ~, resetLBFGS] =  self.cauchy(x, g);
@@ -172,12 +182,13 @@ classdef LBFGSSolver < solvers.NlpSolver
                     self.logger.debug('Mtimes has failed inside cauchy: restart iteration');
                     continue
                 end
-                
+                    
                 % Subspace minimization
                 if nFree > 0 && self.LbfgsUpdates > 0
-                    [d, cgit, ~] = self.subspaceMinimization(x, g, xc, c, indFree, nFree);
+                    [d, cgit, cgout] = self.subspaceMinimization(x, g, xc, c, indFree, nFree);
                     self.iterCg = self.iterCg + cgit;
                 else
+                    cgout = NaN;
                     d = xc - x;
                 end
                 
@@ -190,7 +201,7 @@ classdef LBFGSSolver < solvers.NlpSolver
                     self.logger.debug('Not a descent direction: restart iteration');
                     continue
                 end
-                [x, f, g, LSfailed] = strongWolfe(self, x, f, g, d, dg);
+                [x, f, g, LSfailed, LSiter] = strongWolfe(self, x, f, g, d, dg);
                 
                 % Update L-BFGS operator
                 resetLBFGS = self.updateLBFGS(x - xOld, g - gOld);
@@ -198,14 +209,21 @@ classdef LBFGSSolver < solvers.NlpSolver
                     % The cholesky factorization has failed: reset matrix
                     self.initLBFGS();
                     self.logger.debug('failed chol in update: restart iteration');
+                    self.iter = self.iter + 1;
+                    continue
                 end
+                
+                self.logger.trace(['x = ', sprintf('%9.2e  ', x)])
+                self.logger.trace(['g = ', sprintf('%9.2e  ', g)])
+                
+                actRed = (fOld - f);
                 
                 self.iter = self.iter + 1;
             end % main loop
             
-            self.nObjFunc = self.nlp.ncalls_fobj + self.nlp.ncalls_fcon;
-            self.nGrad = self.nlp.ncalls_gobj + self.nlp.ncalls_gcon;
-            self.nHess = self.nlp.ncalls_hvp + self.nlp.ncalls_hes;
+            self.nObjFunc = self.nlp.ncalls_fobj;
+            self.nGrad = self.nlp.ncalls_gobj;
+            self.nHess = 0;
             
             %% End of solve
             self.solveTime = toc(self.solveTime);
@@ -322,7 +340,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             % Compute the indices of the breakpoints sorted form the
             % smallest breakpoint to the greatest
             [~, F] = sort(breakpoints);
-            F = F(sum(~indFree)+1:end);
+            F = F(nnz(~indFree)+1:end);
         end
         
         function [xc, c, indFree, nFree, tOld, resetLBFGS] = cauchy(self, x, g)
@@ -377,8 +395,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             % First breakpoint
             b = F(iter);
             t = breakpoints(b);
-            deltaT = t;
-            
+            deltaT = t;            
             
             %% Examination of subsequent segments
             while deltaTMin >= deltaT && toc(self.solveTime) < self.maxRT
@@ -400,6 +417,10 @@ classdef LBFGSSolver < solvers.NlpSolver
                 % We leave if all the constraints are active
                 if iter > length(F)
                     tOld = t;
+                    self.logger.trace( ['xc = ', sprintf('%9.2e ', xc)] )
+                    self.logger.debug( sprintf('Iterations : %d', iter) );
+                    self.logger.debug( sprintf('nFree      : %d', nFree ));
+                    self.logger.debug('-- Leaving Cauchy --');
                     return
                 end
                 
@@ -435,6 +456,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             
             resetLBFGS = false;
             
+            self.logger.trace( ['xc = ', sprintf('%9.2e ', xc)] )
             self.logger.debug( sprintf('Iterations : %d', iter) );
             self.logger.debug( sprintf('nFree      : %d', nFree ));
             self.logger.debug('-- Leaving Cauchy --');
@@ -527,11 +549,11 @@ classdef LBFGSSolver < solvers.NlpSolver
             self.logger.debug(' -- Leaving Subspace minimization -- ');
         end
         
-        function [x, f, g, failed] = strongWolfe(self, x, f, g, d, dginit)
+        function [x, f, g, failed, nfev] = strongWolfe(self, x, f, g, d, dginit)
             %% StrongWolfe
             %  Wrapper to the More and Thuente line search
-            %  It is necessary to have the files cvsrch.m and cstep.m on
-            %  the path to use the line search
+            %  The files cvsrch.m and cstep.m are stored in the utils
+            %  folder
             %
             %  The subroutine finds a step that satisfies the strong Wolfe
             %  conditions whose parameters are defined in the solver.
@@ -549,12 +571,13 @@ classdef LBFGSSolver < solvers.NlpSolver
             self.logger.debug(sprintf('Initial step = %7.1e', stp));
             
             % Call More and Thuente line search
-            [x, f, g, ~, info] = utils.cvsrch( ...
+            [x, f, g, ~, info, nfev] = utils.cvsrch( ...
                 @self.objParamsWrapper, ... Objective wrapper
                 x, [], f, g, ... Objective value at x
                 d, stp, dginit, ... Search direction and recommended step
                 self.fSuffDec, self.gSuffDec, eps, ...
-                stpmin, stpmax, self.maxEval - self.nlp.ncalls_fobj);
+                stpmin, stpmax, ...
+                min(self.maxEval - self.nlp.ncalls_fobj, self.maxIterLS));
             
             switch info
                 case 0
@@ -614,7 +637,7 @@ classdef LBFGSSolver < solvers.NlpSolver
                 self.logger.debug('L-BFGS: Rejecting {s, y} pair');
                 self.LbfgsRejects = self.LbfgsRejects + 1;
                 self.iReject = self.iReject + 1;
-                if self.iReject >= 5
+                if self.iReject >= 2
                     self.iReject = 0;
                     resetLBFGS = true;
                     return
@@ -711,7 +734,7 @@ classdef LBFGSSolver < solvers.NlpSolver
                  * (v(1:nPairs) ./ self.dd(self.beg:end)) ...
                  + v(nPairs+1:2*nPairs), ...
                  struct('LT', true) );
-            if R < eps
+            if R < self.MINRCOND
                 % If the system is ill-conditioned, we leave
                 illCond = true;
                 p = [];
@@ -726,7 +749,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             % Solve J'p2 = p2
             p2 = linsolve(self.J, p2, ...
                 struct('LT', true, 'TRANSA', true) );
-            if R < eps
+            if R < self.MINRCOND
                 % If the system is ill-conditioned, we leave
                 illCond = true;
                 p = [];
@@ -742,12 +765,10 @@ classdef LBFGSSolver < solvers.NlpSolver
             illCond = false;
         end
         
-        function [p, resetMatrix] = Btimes(self, v, ind)
+        function [v, resetMatrix] = Btimes(self, v, ind)
             %% BTimes - Apply the pseudohessian
             %  Compute the product by the L-BFGS hessian approximation
-            if self.beg == self.LbfgsMem + 1
-                p = v;
-            else
+            if self.beg ~= self.LbfgsMem + 1
                 if nargin < 3
                     p = self.Wtimes(v, 2);
                     [p, illCond] = self.Mtimes(p);
@@ -756,7 +777,7 @@ classdef LBFGSSolver < solvers.NlpSolver
                         resetMatrix = true;
                         return
                     end
-                    p = self.theta * v - self.Wtimes(p, 1);
+                    v = self.theta * v - self.Wtimes(p, 1);
                 else % Reduced vectors
                     p = self.Wtimes(v, 2, ind);
                     [p, illCond] = self.Mtimes(p);
@@ -765,7 +786,7 @@ classdef LBFGSSolver < solvers.NlpSolver
                         resetMatrix = true;
                         return
                     end
-                    p = self.theta * v - self.Wtimes(p, 1, ind);
+                    v = self.theta * v - self.Wtimes(p, 1, ind);
                 end
             end
             resetMatrix = false;
