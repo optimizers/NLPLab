@@ -12,7 +12,6 @@ classdef LbfgsbSolver < solvers.NlpSolver
         startAttempt = [];
         fid;
         fMin;
-        hist;
     end
     
     properties (Hidden = true, Constant)
@@ -109,13 +108,16 @@ classdef LbfgsbSolver < solvers.NlpSolver
                         'max_iter',  self.maxIter, ...
                         'max_fg',    self.maxEval, ...
                         'verbosity', verb, ...
-                        'printEvery', printEvery, ...
-                        'post_processing', {@(x, p)x(1) ; @(x,p)x(2)} )...
+                        'printEvery', printEvery )...
                 );
-            self.hist = info.err;
+            
             switch info.taskInteger
                 case 2
-                    self.iStop = self.EXIT_MAX_ITER;
+                    if info.iterations >= self.maxIter
+                        self.iStop = self.EXIT_MAX_ITER;
+                    else
+                        self.iStop = self.EXIT_MAX_EVAL;
+                    end
                 case 3
                     self.iStop = self.EXIT_INNER_FAIL;
                 case 21
