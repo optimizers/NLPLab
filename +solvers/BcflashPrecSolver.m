@@ -29,9 +29,9 @@ classdef BcflashPrecSolver < solvers.BcflashSolver
             %% Constructor
             
             % Check if the model has the required properties
-            if ~isprop(nlp, 'M')
-                error('The model must containt a M operator');
-            end
+%             if ~isprop(nlp, 'M')
+%                 error('The model must containt a M operator');
+%             end
             
             self = self@solvers.BcflashSolver(nlp, varargin{:});
         end % constructor
@@ -123,8 +123,7 @@ classdef BcflashPrecSolver < solvers.BcflashSolver
                 gQuad = Hs(indFree) + wa;
                 
                 % Reduced preconditioned direction
-                Mfree = self.nlp.M(indFree, indFree);
-                ptw = wa.' * Mfree * wa;
+                ptw = wa.' * self.nlp.precSubTimes(wa, indFree);
                 
                 % Solve the trust region subproblem in the free variables
                 % to generate a direction p[k]. Store p[k] in the array w.
@@ -134,7 +133,7 @@ classdef BcflashPrecSolver < solvers.BcflashSolver
                 
                 
                 [w, iterTR, infoTR] = self.trpcg( ...
-                    Hfree, gQuad, Mfree, delta, tol, self.maxIterCg, s(indFree));
+                    Hfree, gQuad, indFree, delta, tol, self.maxIterCg, s(indFree));
                 iters = iters + iterTR;
                 
                 % Use a projected search to obtain the next iterate.
@@ -150,7 +149,7 @@ classdef BcflashPrecSolver < solvers.BcflashSolver
                 % Compute A*(x[k+1] - x[0]) and store in w.
                 Hs = H * s;
                 newwa = (wa + Hs(indFree));
-                normWa = newwa.' * Mfree * newwa;
+                normWa = newwa.' * self.nlp.precSubTimes(newwa, indFree);
                 
                 
                 % Convergence and termination test.
@@ -189,11 +188,11 @@ classdef BcflashPrecSolver < solvers.BcflashSolver
             
             p = g;
             p(Iplus) = 0;
-            p = self.nlp.M * p;
+            p = self.nlp.precTimes(p);
             p(Iplus) = 0;
         end
         
-        function [w, iters, info] = trpcg(self, H, g, M, delta, tol, iterMax, s)
+        function [w, iters, info] = trpcg(self, H, g, indFree, delta, tol, iterMax, s)
             %% TRPCG - Trust-region projected conjugate gradient
             % This subroutine uses a truncated conjugate gradient method to
             % find an approximate minimizer of the trust-region subproblem
@@ -238,7 +237,7 @@ classdef BcflashPrecSolver < solvers.BcflashSolver
             % Initialize the residual r of grad q to -g.
             r = -g;
             % Initialize the preconditioned search direction
-            z = M * r;
+            z = self.nlp.precSubTimes(r, indFree);
             % Initialize the direction p.
             p = z;
             % Initialize rho and the norms of r and t.
@@ -293,7 +292,7 @@ classdef BcflashPrecSolver < solvers.BcflashSolver
                 r = r - alph * q;
                 
                 % Compute the new preconditioned direction
-                z = M * r;
+                z = self.nlp.precSubTimes(r, indFree);
                 rtz = r.'*z;
                 
                 % Exit if the residual convergence test is satisfied.
