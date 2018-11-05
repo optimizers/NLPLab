@@ -208,6 +208,7 @@ classdef LBFGSSolver < solvers.NlpSolver
                 if nFree == 0 || self.LbfgsUpdates == 0
                     cgout = NaN;
                     d = xc - x;
+                    self.logger.debug('Skipping Subspace minimization');
                 else
                     [d, cgit, cgout, failed] = self.subspaceMinimization(x, g, xc, c, indFree, nFree);
                     self.iterCg = self.iterCg + cgit;
@@ -524,7 +525,7 @@ classdef LBFGSSolver < solvers.NlpSolver
         function [xc, c, indFree, nFree, alph, resetLBFGS] = cauchyB(self, x, g, alph)
             %% CauchyB
             %  Compute the Cauchy point by backtracking
-            
+
             self.logger.debug('-- Entering Cauchy --');
             self.logger.debug(sprintf('α = %7.1e',  alph));
             interpf =  0.5;     % interpolation factor
@@ -540,7 +541,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             
             % Evaluate the initial alph and decide if the algorithm
             % must interpolate or extrapolate.
-            step = self.gpstep(x, -alph, p);
+            step = self.gpstep(x, alph, p);
             gts = g'*step;
             [Bs, failed] = self.Btimes(step);
             if failed
@@ -610,7 +611,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             % Prepare output
             xc = x + step;
             c = self.Wtimes(step, 2);
-            indFree = (xc == self.nlp.bL & p > 0) |...
+            indFree = ~(xc == self.nlp.bL & p > 0) |...
                 (xc == self.nlp.bU & p < 0);
             nFree = nnz(indFree);
             resetLBFGS = false;
