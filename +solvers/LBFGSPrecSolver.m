@@ -1,4 +1,4 @@
-classdef LBFGSSolver < solvers.NlpSolver
+classdef LBFGSPrecSolver < solvers.NlpSolver
     %% LBFGSSolver
     
     
@@ -55,7 +55,7 @@ classdef LBFGSSolver < solvers.NlpSolver
     
     methods (Access = public)
         
-        function o = LBFGSSolver(nlp, varargin)
+        function o = LBFGSPrecSolver(nlp, varargin)
             %% Constructor
             
             % Parse input parameters and initialize local variables
@@ -979,7 +979,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             p(i1) = -sqrt(D) \ p(i1) + D \ (L' * p(i2));
             illCond = false;
         end
-
+        
         function [v, failed] = btimes(o, v, ind)
             %% BTimes - Apply the pseudohessian
             %  Compute the product by the L-BFGS hessian approximation
