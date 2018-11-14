@@ -29,14 +29,16 @@ classdef LBFGSPrecSolver < solvers.NlpSolver
         % Parts of the L-BFGS operator
         
         hd;       % First index of stored pairs
-        cl;        % Number of stored pairs
+        cl;       % Number of stored pairs
         insert;   % Where the last part was inserted
-        ws;       % Array of s vectors
+        ws;       % Array of B0s vectors
         wy;       % Array of y vectors
         theta;    % Scaling parameter
         sy;       % Matrix of the YtS
-        ss;       % Matrix of the StS
+        ss;       % Matrix of the StB0S
         wt;       % cholesky factorization of the middle matrix
+        l;        % L matrix of the compact L-BFGS Formula
+        dd;       % diagonal of the D matrix of the compact L-BFGS formula
         iReject;  % Number of successive step rejections
     end
     
@@ -217,10 +219,7 @@ classdef LBFGSPrecSolver < solvers.NlpSolver
                 o.logger.trace(['xmin = ', sprintf('%9.2e  ', x + d)]);
                 
                 % Line search
-                if o.iter == 127
-                    1;
-                end
-                
+
                 dg = dot(d, g);
                 if dg > -eps
                     % This is not a descent direction: restart iteration
@@ -389,6 +388,8 @@ classdef LBFGSPrecSolver < solvers.NlpSolver
             indFree = (abs(breakpoints) >= eps);
             d = zeros(o.nlp.n, 1);
             d(indFree) = -g(indFree);
+            d = o.nlp.precTimes(d);
+            d(~indFree) = 0;
             
             % Compute the indices of the breakpoints sorted form the
             % smallest breakpoint to the greatest
@@ -655,11 +656,11 @@ classdef LBFGSPrecSolver < solvers.NlpSolver
             end
             
             epsilon = min(o.cgTol, sqrt(normRc)) * normRc;
-            
             r = rc;
-            p = -rc;
+            z = o.nlp.precSubTimes(r, indFree);
+            p = -z;
             d = zeros(length(r),1);
-            rho2 = r.'*r;
+            rho2 = r .'* z;
             
             while true
                 iter = iter + 1;
@@ -682,7 +683,8 @@ classdef LBFGSPrecSolver < solvers.NlpSolver
                     break;
                 end
                 % Compute the minimal breakpoint
-                alf1 = min( o.brkpt(xc(indFree) + d, p, indFree, nFree) );
+                %alf1 = min( o.brkpt(xc(indFree) + d, p, indFree, nFree) );
+                alf1 = Inf;
                 
                 % Compute step length
                 [q, failed] = o.btimes(p, indFree);
@@ -704,13 +706,16 @@ classdef LBFGSPrecSolver < solvers.NlpSolver
                 % Prepare new step
                 d = d + alf2 * p;
                 r = r + alf2 * q;
+                z = o.nlp.precSubTimes(r, indFree);
                 rho1 = rho2;
-                rho2 = (r.' * r);
+                rho2 = (r.' * z);
                 beta = rho2 / rho1;
-                p = -r + beta * p;
+                p = -z + beta * p;
             end
             s = xc  -x;
-            s(indFree) = s(indFree) + d;
+            alf1 = min( o.brkpt(xc(indFree), d, indFree, nFree) );
+            s(indFree) = s(indFree) + alf1 * d;
+            %s(indFree) = s(indFree) + d;
             failed = false;
             o.logger.debug(sprintf('||s|| = %9.3e', norm(s)));
             o.logger.debug(' -- Leaving Subspace minimization -- ');
@@ -814,9 +819,9 @@ classdef LBFGSPrecSolver < solvers.NlpSolver
             o.logger.debug('-- Entering updateLBFGS --');
             
             ys = dot(y, s);
-            yy = dot(y, y);
+            yH0y = dot(y, o.nlp.precTimes(y));
             
-            if ys <= eps * max(yy, 1)
+            if ys <= eps * max(yH0y, 1)
                 o.logger.debug('L-BFGS: Rejecting {s, y} pair');
                 o.nrejects = o.nrejects + 1;
                 o.iReject = o.iReject + 1;
@@ -829,7 +834,8 @@ classdef LBFGSPrecSolver < solvers.NlpSolver
                 return
             end
             
-            dtd = dot(s, s);
+            B0s = o.nlp.precDiv(s);
+            stB0s = dot(s, B0s);
             
             % Set the column indices where to put the new pairs
             if o.cl < o.mem
@@ -847,19 +853,22 @@ classdef LBFGSPrecSolver < solvers.NlpSolver
             end
             
             % Update S and Y matrices and the scaling factor theta
-            o.ws(:,o.insert) = s;
+            o.ws(:,o.insert) = B0s;
             o.wy(:,o.insert) = y;
-            o.theta = yy / ys;
+            o.theta = yH0y / ys;
             
             % Add new information in sy and ss
             k = o.hd;
             for j = 1 : o.cl - 1
-                o.sy(o.cl,j) = dot(y, o.wy(:,k));
+                o.sy(o.cl,j) = dot(s, o.wy(:,k));
                 o.ss(j,o.cl) = dot(s, o.ws(:,k));
                 k = mod(k, o.mem) + 1;
             end
-            o.ss(o.cl,o.cl) = dtd;
+            o.ss(o.cl,o.cl) = stB0s;
             o.sy(o.cl,o.cl) = ys;
+            o.l  = tril(o.sy(1:o.cl,1:o.cl), -1);
+            o.dd = diag(o.sy(1:o.cl,1:o.cl));
+            
             
             % Compute the Cholesky factorization 
             % of T = theta * ss + L * D^(-1) * L' and store it
@@ -871,8 +880,7 @@ classdef LBFGSPrecSolver < solvers.NlpSolver
                                                   o.cl, o.cl) \ ...
                 tril(o.sy(1:o.cl,1:o.cl), -1).' );
             
-            [tmp, p] = ...
-                chol(o.wt(1:o.cl,1:o.cl));
+            [tmp, p] = chol(o.wt(1:o.cl,1:o.cl));
             if p > 0
                 % The Cholesky factorization has failed
                 failed = true;
@@ -933,20 +941,16 @@ classdef LBFGSPrecSolver < solvers.NlpSolver
                 p = [];
                 return
             end
-            
-            persistent L D
             p = zeros(2 * o.cl, 1);
             i1 = 1:o.cl;
             i2 = i1 + o.cl;
-            L = tril(o.sy(i1,i1), -1);
-            D = spdiags(diag(o.sy(i1,i1)), 0, o.cl, o.cl);
             
             % solve [  D^(1/2)      O ] [ p1 ] = [ q1 ]
             %       [ -L*D^(-1/2)   J ] [ p2 ]   [ q2 ].
             
             % solve Jp2 = q2 + L * D^(-1) * q1
             
-            p(i2) = q(i2)   + L * (D \ q(i1));
+            p(i2) = q(i2) + o.l * (q(i1) ./ o.dd);
             
             [p(i2), R] = linsolve(o.wt(i1,i1),  p(i2), ...
                 struct('UT', true, 'TRANSA', true));
@@ -959,7 +963,7 @@ classdef LBFGSPrecSolver < solvers.NlpSolver
             end
 
             % Solve D^(1/2) * p1 = q1
-            p(i1) = sqrt(D) \ q(i1);
+            p(i1) = q(i1) ./ sqrt(o.dd);
 
             % Solve [ -D^(1/2)   D^(-1/2)*L'  ] [ p1 ] = [ p1 ]
             %       [  0         J'           ] [ p2 ] = [ p2 ]
@@ -976,7 +980,7 @@ classdef LBFGSPrecSolver < solvers.NlpSolver
             end
 
             % Compute p1 = -D^(-1/2) (p1 - D^(-1/2)*L'*p2)
-            p(i1) = -sqrt(D) \ p(i1) + D \ (L' * p(i2));
+            p(i1) = -p(i1) ./ sqrt(o.dd) + (o.l' * p(i2)) ./ o.dd;
             illCond = false;
         end
         
@@ -991,7 +995,7 @@ classdef LBFGSPrecSolver < solvers.NlpSolver
                         % The Mtimes function has returned an error
                         return
                     end
-                    v = o.theta * v - o.wtimes(p);
+                    v = o.theta * o.nlp.precDiv(v) - o.wtimes(p);
                 else % Reduced vectors
                     p = o.wtrtimes(v, ind);
                     [p, failed] = o.mtimes(p);
@@ -999,7 +1003,8 @@ classdef LBFGSPrecSolver < solvers.NlpSolver
                         % The Mtimes function has returned an error
                         return
                     end
-                    v = o.theta * v - o.wtimes(p, ind);
+                    v = o.theta * o.nlp.precSubDiv(v, ind) ...
+                        - o.wtimes(p, ind);
                 end
             end
             failed = false;

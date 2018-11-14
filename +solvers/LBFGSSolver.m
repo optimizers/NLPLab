@@ -29,7 +29,7 @@ classdef LBFGSSolver < solvers.NlpSolver
         % Parts of the L-BFGS operator
         
         hd;       % First index of stored pairs
-        cl;        % Number of stored pairs
+        cl;       % Number of stored pairs
         insert;   % Where the last part was inserted
         ws;       % Array of s vectors
         wy;       % Array of y vectors
@@ -37,6 +37,8 @@ classdef LBFGSSolver < solvers.NlpSolver
         sy;       % Matrix of the YtS
         ss;       % Matrix of the StS
         wt;       % cholesky factorization of the middle matrix
+        l;        % L matrix of the compact L-BFGS Formula
+        dd;       % diagonal of the D matrix of the compact L-BFGS formula
         iReject;  % Number of successive step rejections
     end
     
@@ -217,10 +219,7 @@ classdef LBFGSSolver < solvers.NlpSolver
                 o.logger.trace(['xmin = ', sprintf('%9.2e  ', x + d)]);
                 
                 % Line search
-                if o.iter == 127
-                    1;
-                end
-                
+
                 dg = dot(d, g);
                 if dg > -eps
                     % This is not a descent direction: restart iteration
@@ -655,11 +654,10 @@ classdef LBFGSSolver < solvers.NlpSolver
             end
             
             epsilon = min(o.cgTol, sqrt(normRc)) * normRc;
-            
             r = rc;
             p = -rc;
             d = zeros(length(r),1);
-            rho2 = r.'*r;
+            rho2 = r .'* r;
             
             while true
                 iter = iter + 1;
@@ -682,7 +680,8 @@ classdef LBFGSSolver < solvers.NlpSolver
                     break;
                 end
                 % Compute the minimal breakpoint
-                alf1 = min( o.brkpt(xc(indFree) + d, p, indFree, nFree) );
+                %alf1 = min( o.brkpt(xc(indFree) + d, p, indFree, nFree) );
+                alf1 = Inf;
                 
                 % Compute step length
                 [q, failed] = o.btimes(p, indFree);
@@ -710,7 +709,8 @@ classdef LBFGSSolver < solvers.NlpSolver
                 p = -r + beta * p;
             end
             s = xc  -x;
-            s(indFree) = s(indFree) + d;
+            alf1 = min( o.brkpt(xc(indFree), d, indFree, nFree) );
+            s(indFree) = s(indFree) + alf1 * d;
             failed = false;
             o.logger.debug(sprintf('||s|| = %9.3e', norm(s)));
             o.logger.debug(' -- Leaving Subspace minimization -- ');
@@ -854,12 +854,14 @@ classdef LBFGSSolver < solvers.NlpSolver
             % Add new information in sy and ss
             k = o.hd;
             for j = 1 : o.cl - 1
-                o.sy(o.cl,j) = dot(y, o.wy(:,k));
+                o.sy(o.cl,j) = dot(s, o.wy(:,k));
                 o.ss(j,o.cl) = dot(s, o.ws(:,k));
                 k = mod(k, o.mem) + 1;
             end
             o.ss(o.cl,o.cl) = dtd;
             o.sy(o.cl,o.cl) = ys;
+            o.l  = tril(o.sy(1:o.cl,1:o.cl), -1);
+            o.dd = diag(o.sy(1:o.cl,1:o.cl));
             
             % Compute the Cholesky factorization 
             % of T = theta * ss + L * D^(-1) * L' and store it
@@ -871,8 +873,7 @@ classdef LBFGSSolver < solvers.NlpSolver
                                                   o.cl, o.cl) \ ...
                 tril(o.sy(1:o.cl,1:o.cl), -1).' );
             
-            [tmp, p] = ...
-                chol(o.wt(1:o.cl,1:o.cl));
+            [tmp, p] = chol(o.wt(1:o.cl,1:o.cl));
             if p > 0
                 % The Cholesky factorization has failed
                 failed = true;
@@ -933,20 +934,16 @@ classdef LBFGSSolver < solvers.NlpSolver
                 p = [];
                 return
             end
-            
-            persistent L D
             p = zeros(2 * o.cl, 1);
             i1 = 1:o.cl;
             i2 = i1 + o.cl;
-            L = tril(o.sy(i1,i1), -1);
-            D = spdiags(diag(o.sy(i1,i1)), 0, o.cl, o.cl);
             
             % solve [  D^(1/2)      O ] [ p1 ] = [ q1 ]
             %       [ -L*D^(-1/2)   J ] [ p2 ]   [ q2 ].
             
             % solve Jp2 = q2 + L * D^(-1) * q1
             
-            p(i2) = q(i2)   + L * (D \ q(i1));
+            p(i2) = q(i2)   + o.l * (q(i1) ./ o.dd);
             
             [p(i2), R] = linsolve(o.wt(i1,i1),  p(i2), ...
                 struct('UT', true, 'TRANSA', true));
@@ -959,7 +956,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             end
 
             % Solve D^(1/2) * p1 = q1
-            p(i1) = sqrt(D) \ q(i1);
+            p(i1) = q(i1) ./ sqrt(o.dd);
 
             % Solve [ -D^(1/2)   D^(-1/2)*L'  ] [ p1 ] = [ p1 ]
             %       [  0         J'           ] [ p2 ] = [ p2 ]
@@ -976,7 +973,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             end
 
             % Compute p1 = -D^(-1/2) (p1 - D^(-1/2)*L'*p2)
-            p(i1) = -sqrt(D) \ p(i1) + D \ (L' * p(i2));
+            p(i1) = -p(i1) ./ sqrt(o.dd) + (o.l' * p(i2)) ./ o.dd;
             illCond = false;
         end
 
