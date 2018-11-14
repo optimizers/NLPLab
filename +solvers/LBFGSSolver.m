@@ -39,6 +39,9 @@ classdef LBFGSSolver < solvers.NlpSolver
         wt;       % cholesky factorization of the middle matrix
         l;        % L matrix of the compact L-BFGS Formula
         dd;       % diagonal of the D matrix of the compact L-BFGS formula
+        iprs      % indices of the current pairs
+        triup     % Used to move information in arrays
+        tridown   % 
         iReject;  % Number of successive step rejections
     end
     
@@ -95,6 +98,13 @@ classdef LBFGSSolver < solvers.NlpSolver
             
             % Initialize the L-BFGS operator
             o.initLBFGS();
+            
+            % Init triup and tridown
+            o.triup = [triu(true(o.mem-1,o.mem-1)), false(o.mem-1,1); ...
+                       false(1,o.mem)];
+            o.tridown = [ false(1,o.mem); ...
+                false(o.mem-1,1), triu(true(o.mem-1,o.mem-1))];
+                         
             
             import utils.PrintInfo;
         end % constructor
@@ -796,6 +806,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             o.theta = 1.0;
             o.hd = 1;
             o.cl = 0;
+            o.iprs = [];
             
             % Initialize arrays
             o.ws = zeros(o.nlp.n, o.mem);
@@ -840,24 +851,21 @@ classdef LBFGSSolver < solvers.NlpSolver
                 o.hd = mod(o.hd, o.mem) + 1;
                 
                 % Move old information in sy and ss
-                for j = 1 : o.cl - 1
-                    o.ss(1:j,j) = o.ss(2:j+1,j+1);
-                    o.sy(j:o.cl-1,j) = o.sy(j+1:o.cl,j+1);
-                end
+                o.ss(o.triup) = o.ss(o.tridown);
+                o.sy(o.triup') = o.sy(o.tridown');
             end
+            
             
             % Update S and Y matrices and the scaling factor theta
             o.ws(:,o.insert) = s;
             o.wy(:,o.insert) = y;
             o.theta = yy / ys;
+            o.iprs = mod(o.hd - 1 : o.hd + o.cl - 2, o.mem) + 1;
             
             % Add new information in sy and ss
-            k = o.hd;
-            for j = 1 : o.cl - 1
-                o.sy(o.cl,j) = dot(s, o.wy(:,k));
-                o.ss(j,o.cl) = dot(s, o.ws(:,k));
-                k = mod(k, o.mem) + 1;
-            end
+            o.sy(o.cl,1:o.cl-1) = s.' * o.wy(:,o.iprs(1:end-1));
+            o.ss(1:o.cl-1,o.cl) = o.ws(:,o.iprs(1:end-1)).' * s;
+            
             o.ss(o.cl,o.cl) = dtd;
             o.sy(o.cl,o.cl) = ys;
             o.l  = tril(o.sy(1:o.cl,1:o.cl), -1);
@@ -887,40 +895,19 @@ classdef LBFGSSolver < solvers.NlpSolver
         
         function v = wtimes(o, p, ind)
             %% wtimes - Direct product by the W matrix
-            k = o.hd;
             if nargin < 3 % Full vector
-                v = zeros(o.nlp.n, 1);
-                for i = 1 : o.cl
-                    v = v + p(i) * o.wy(:,k);
-                    v = v + o.theta * p(i+o.cl) * o.ws(:,k);
-                    k = mod(k, o.mem) + 1;
-                end
+                v = [o.wy(:,o.iprs), o.theta * o.ws(:,o.iprs)] * p;
             else % Subvector
-                v = zeros(nnz(ind), 1);
-                for i = 1 : o.cl
-                    v = v + p(i) * o.wy(ind,k);
-                    v = v + o.theta * p(i+o.cl) * o.ws(ind,k);
-                    k = mod(k, o.mem) + 1;
-                end
+                v = [o.wy(ind,o.iprs), o.theta * o.ws(ind,o.iprs)] * p;
             end
         end
         
         function p = wtrtimes(o, v, ind)
             %% wtrtimes - Adjoint product by the matrix
-            k = o.hd;
-            p = zeros(2 * o.cl, 1);
             if nargin < 3 % Full vector
-                for i = 1 : o.cl
-                    p(i) = dot(o.wy(:,k), v);
-                    p(i+o.cl) = o.theta * dot(o.ws(:,k), v);
-                    k = mod(k, o.mem) + 1;
-                end
+                p = [o.wy(:,o.iprs), o.theta * o.ws(:,o.iprs)].' * v;
             else
-                for i = 1 : o.cl
-                    p(i) = dot(o.wy(ind,k), v);
-                    p(i+o.cl) = o.theta * dot(o.ws(ind,k), v);
-                    k = mod(k, o.mem) + 1;
-                end
+                p = [o.wy(ind,o.iprs), o.theta * o.ws(ind,o.iprs)].' * v;
             end
         end
         

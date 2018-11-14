@@ -193,24 +193,20 @@ classdef LBFGSPrecSolver < solvers.LBFGSSolver
                 o.hd = mod(o.hd, o.mem) + 1;
                 
                 % Move old information in sy and ss
-                for j = 1 : o.cl - 1
-                    o.ss(1:j,j) = o.ss(2:j+1,j+1);
-                    o.sy(j:o.cl-1,j) = o.sy(j+1:o.cl,j+1);
-                end
+                o.ss(o.triup) = o.ss(o.tridown);
+                o.sy(o.triup') = o.sy(o.tridown');
             end
             
             % Update S and Y matrices and the scaling factor theta
             o.ws(:,o.insert) = B0s;
             o.wy(:,o.insert) = y;
             o.theta = yH0y / ys;
+            o.iprs = mod(o.hd - 1 : o.hd + o.cl - 2, o.mem) + 1;
             
             % Add new information in sy and ss
-            k = o.hd;
-            for j = 1 : o.cl - 1
-                o.sy(o.cl,j) = dot(s, o.wy(:,k));
-                o.ss(j,o.cl) = dot(s, o.ws(:,k));
-                k = mod(k, o.mem) + 1;
-            end
+            o.sy(o.cl,1:o.cl-1) = s.' * o.wy(:,o.iprs(1:end-1));
+            o.ss(1:o.cl-1,o.cl) = o.ws(:,o.iprs(1:end-1)).' * s;
+            
             o.ss(o.cl,o.cl) = stB0s;
             o.sy(o.cl,o.cl) = ys;
             o.l  = tril(o.sy(1:o.cl,1:o.cl), -1);
