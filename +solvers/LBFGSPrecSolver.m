@@ -257,6 +257,12 @@ classdef LBFGSPrecSolver < solvers.LBFGSSolver
                     v = o.theta * o.nlp.precSubDiv(v, ind) ...
                         - o.wtimes(p, ind);
                 end
+            else
+                if nargin < 3
+                    v = o.theta * o.nlp.precDiv(v);
+                else
+                     v = o.theta * o.nlp.precSubDiv(v, ind);
+                end
             end
             failed = false;
         end

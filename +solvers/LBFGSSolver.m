@@ -203,7 +203,7 @@ classdef LBFGSSolver < solvers.NlpSolver
                 end
                 if failed
                     % Mtimes has failed: reset LBFGS matrix
-                    o.initLBFGS();
+                    o.resetLBFGS();
                     o.iter = o.iter + 1;
                     o.logger.debug('Mtimes has failed inside cauchy: restart iteration');
                     continue
@@ -219,7 +219,7 @@ classdef LBFGSSolver < solvers.NlpSolver
                     o.iterCg = o.iterCg + cgit;
                     if failed
                         % Mtimes has failed: reset LBFGS matrix
-                        o.initLBFGS();
+                        o.resetLBFGS();
                         o.iter = o.iter + 1;
                         o.logger.debug('Mtimes has failed inside subsmin: restart iteration');
                         continue
@@ -233,7 +233,7 @@ classdef LBFGSSolver < solvers.NlpSolver
                 dg = dot(d, g);
                 if dg > -eps
                     % This is not a descent direction: restart iteration
-                    o.initLBFGS();
+                    o.resetLBFGS();
                     o.iter = o.iter + 1;
                     o.logger.debug('Not a descent direction: restart iteration');
                     continue
@@ -248,7 +248,7 @@ classdef LBFGSSolver < solvers.NlpSolver
                         LSfailed = true;
                         o.logger.debug('Abnormal termination in linesearch');
                     else
-                        o.initLBFGS();
+                        o.resetLBFGS();
                         o.logger.debug('Linesearch failed: restart iteration');
                     end
                     o.iter = o.iter + 1;
@@ -816,6 +816,17 @@ classdef LBFGSSolver < solvers.NlpSolver
             o.wt = zeros(o.mem);
         end
         
+        function resetLBFGS(o)
+            %% ResetLBFGS - Discard stored pairs
+            
+            o.nrejects = 0;
+            o.insert = 0;
+            o.theta = 1.0;
+            o.hd = 1;
+            o.cl = 0;
+            o.iprs = 0;
+        end
+        
         function failed = updateLBFGS(o, s, y)
             %% UpdateLBFGS - Add a new pair to the pseudohessian
             % Store the new pair {y, s} into the L-BFGS approximation
@@ -887,7 +898,6 @@ classdef LBFGSSolver < solvers.NlpSolver
                 failed = true;
                 return
             end
-            
             o.wt(1:o.cl,1:o.cl) = tmp;
             
             failed = false;
@@ -896,18 +906,21 @@ classdef LBFGSSolver < solvers.NlpSolver
         function v = wtimes(o, p, ind)
             %% wtimes - Direct product by the W matrix
             if nargin < 3 % Full vector
-                v = [o.wy(:,o.iprs), o.theta * o.ws(:,o.iprs)] * p;
+                v = o.wy(:,o.iprs) * p(1:o.cl) ...
+                    + o.theta * o.ws(:,o.iprs) * p(o.cl+1:2*o.cl);
             else % Subvector
-                v = [o.wy(ind,o.iprs), o.theta * o.ws(ind,o.iprs)] * p;
+                v = o.wy(ind,o.iprs) * p(1:o.cl) ... 
+                    + o.theta * o.ws(ind,o.iprs) * p(o.cl+1:2*o.cl);
             end
         end
         
         function p = wtrtimes(o, v, ind)
             %% wtrtimes - Adjoint product by the matrix
             if nargin < 3 % Full vector
-                p = [o.wy(:,o.iprs), o.theta * o.ws(:,o.iprs)].' * v;
+                p = [o.wy(:,o.iprs).' * v; o.theta * o.ws(:,o.iprs).' * v];
             else
-                p = [o.wy(ind,o.iprs), o.theta * o.ws(ind,o.iprs)].' * v;
+                p = [o.wy(ind,o.iprs).' * v; ...
+                     o.theta * o.ws(ind,o.iprs).' * v];
             end
         end
         
