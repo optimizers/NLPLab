@@ -17,7 +17,6 @@ classdef LBFGSSolver < solvers.NlpSolver
         maxIterLS;
         
         % Cauchy parameters
-        cauchyBacktrack; % True if we use backtracking for the Cauchy Point
         mu0; % Sufficient decrease parameter for the Cauchy search
         
         % L-BFGS data
@@ -76,7 +75,6 @@ classdef LBFGSSolver < solvers.NlpSolver
             p.addParameter('gSuffDec', .9);
             p.addParameter('mem', 29);
             p.addParameter('mu0', 1e-2);
-            p.addParameter('cauchyBacktrack', false);
             
             p.parse(varargin{:});
             
@@ -94,7 +92,6 @@ classdef LBFGSSolver < solvers.NlpSolver
             o.boxed = all(nlp.jTwo);
             o.cnstnd = any(nlp.jUpp | nlp.jLow);
             o.mu0       = p.Results.mu0;
-            o.cauchyBacktrack = p.Results.cauchyBacktrack;
             
             % Initialize the L-BFGS operator
             o.initLBFGS();
@@ -147,9 +144,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             LSiter = 0;
             LSfailed = false;
             cgout = NaN;
-            if o.cauchyBacktrack
-                alph = 1;
-            end
+            alph = 1;
             
             gOld = g;
             xOld = x;
@@ -195,12 +190,8 @@ classdef LBFGSSolver < solvers.NlpSolver
                 end
                 
                 % Cauchy step
-                if ~o.cauchyBacktrack
-                    [xc, c, indFree, nFree, ~, failed] =  o.cauchy(x, g);
-                else
-                    [xc, c, indFree, nFree, alph, failed] = ...
-                        o.cauchyB(x, g, alph);
-                end
+                [xc, c, indFree, nFree, alph, failed] = ...
+                    o.cauchyB(x, g, alph);
                 if failed
                     % Mtimes has failed: reset LBFGS matrix
                     o.resetLBFGS();
@@ -405,129 +396,6 @@ classdef LBFGSSolver < solvers.NlpSolver
                 [~, F] = sort(breakpoints);
                 F = F(nnz(~indFree)+1:end);
             end
-        end
-        
-        function [xc, c, indFree, nFree, tOld, resetLBFGS] = cauchy(o, x, g)
-            %% Cauchy - Compute the Cauchy Point
-            %  Compute a Cauchy point by finding the first local minimum of
-            %  the quadratic model
-            %
-            %        m(x) = 1/2*x'*B*x + g'*x
-            %
-            %  along the piecewise affine path
-            %
-            %        x(t) = P(x - tg)
-            %
-            %  Inputs:
-            %        - x: the point where we are at the last iterate
-            %        - g: the gradient of the objective function at x
-            %  Outputs:
-            %        - xc: the Cauchy point !
-            %        - c:  a vector that is useful for the subspace
-            %        minimization = W'(xc - x)
-            
-            o.logger.debug('-- Entering Cauchy --');
-            
-            % Compute breakpoints in the gradient direction
-            [breakpoints, d, F, indFree] = o.cauchyDirection(x, g);
-            o.logger.debug(sprintf('brptMax = %7.1e', max(breakpoints)));
-            o.logger.debug(sprintf('brptMin = %7.1e', min(breakpoints)));
-            o.logger.debug(sprintf('brpt(F1) = %7.1e', breakpoints(F(1)) ));
-            
-            %% Initialization
-            xc = x;
-            iter = 1;
-            nFree = nnz(indFree);
-            kvec = mod(o.hd + (-1 : o.cl - 2), o.mem) + 1;
-            
-            % Starting point for the subspace minimization
-            p = o.wtrtimes(d); % p = Wt*d
-            c = zeros(size(p));
-            
-            % Function derivatives
-            fp  = -(d.' * d);
-            if o.cl > 0
-                [Mp, resetLBFGS] = o.mtimes(p);
-                if resetLBFGS
-                    tOld = 0;
-                    return
-                end
-                fpp = -o.theta * fp - p.' * Mp;
-            else
-                fpp = -o.theta * fp;
-            end
-            
-            % Function minimum on the segment
-            deltaTMin = -fp / fpp;
-            tOld = 0;
-            
-            % First breakpoint
-            b = F(iter);
-            t = breakpoints(b);
-            deltaT = t;            
-            
-            %% Examination of subsequent segments
-            while deltaTMin >= deltaT && toc(o.solveTime) < o.maxRT
-                iter = iter + 1;
-                % Update Cauchy point
-                if d(b) > 0
-                    xc(b) = o.nlp.bU(b);
-                elseif d(b) < 0
-                    xc(b) = o.nlp.bL(b);
-                end
-                
-                %Update active constraint
-                indFree(b) = false;
-                nFree = nFree - 1;
-                
-                % Update c
-                c  = c + deltaT * p;
-                
-                % We leave if all the constraints are active
-                if iter > length(F)
-                    tOld = t;
-                    o.logger.trace( ['xc = ', sprintf('%9.2e ', xc)] )
-                    o.logger.debug( sprintf('Iterations : %d', iter) );
-                    o.logger.debug( sprintf('nFree      : %d', nFree ));
-                    o.logger.debug('-- Leaving Cauchy --');
-                    return
-                end
-                
-                % Update directional derivatives
-                zb = xc(b) - x(b);
-                gb2 = g(b)^2;
-                wbt = [o.wy(b, kvec), ...
-                    o.theta * o.ws(b, kvec)];
-                fp = fp + deltaT * fpp + gb2 + o.theta * g(b) * zb ...
-                    - g(b) * ( wbt * o.mtimes(c) );
-                fpp = fpp - o.theta * gb2 ...
-                    - 2 * g(b) * ( wbt * o.mtimes(p) ) ...
-                    - gb2 * ( wbt * o.mtimes(wbt.') );
-                
-                % Update searching direction
-                p = p + g(b) * wbt.';
-                d(b) = 0;
-                
-                % Find new minimizer and breakpoint
-                deltaTMin = - fp / fpp;
-                tOld = t;
-                b = F(iter);
-                t = breakpoints(b);
-                deltaT = t - tOld;  
-            end
-            
-            %% Final updates
-            deltaTMin = max(deltaTMin, 0);
-            tOld = tOld + deltaTMin;
-            xc(F(iter:end)) = x(F(iter:end)) + tOld * d(F(iter:end));
-            c = c + deltaTMin * p;
-            
-            resetLBFGS = false;
-            
-            o.logger.trace( ['xc = ', sprintf('%9.2e ', xc)] )
-            o.logger.debug( sprintf('Iterations : %d', iter) );
-            o.logger.debug( sprintf('nFree      : %d', nFree ));
-            o.logger.debug('-- Leaving Cauchy --');
         end
         
         function [xc, c, indFree, nFree, alph, resetLBFGS] = cauchyB(o, x, g, alph)

@@ -7,7 +7,6 @@ classdef LBFGSPrecSolver < solvers.LBFGSSolver
         function o = LBFGSPrecSolver(nlp, varargin)
             %% Constructor
             o = o@solvers.LBFGSSolver(nlp, varargin{:});
-            o.cauchyBacktrack = true;
         end % constructor
         
         %% Operations and constraints handling
