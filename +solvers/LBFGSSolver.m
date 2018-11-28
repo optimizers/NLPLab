@@ -47,6 +47,8 @@ classdef LBFGSSolver < solvers.NlpSolver
     properties (Hidden = true, Constant)
         % Minimal accepted condition number
         MINRCOND = eps;
+        UP = struct('UT', true);
+        UPTR = struct('UT', true, 'TRANSA', true);
         
         % Log header and body formats.
         LOG_HEADER_FORMAT = '\n%5s  %13s  %13s  %13s  %4s  %5s  %9s  %4s  %9s\n';
@@ -190,8 +192,8 @@ classdef LBFGSSolver < solvers.NlpSolver
                 end
                 
                 % Cauchy step
-                [xc, c, indFree, nFree, alph, failed] = ...
-                    o.cauchyB(x, g, alph);
+                [d, indFree, nFree, alph, failed] = ...
+                    o.cauchy(x, g, alph);
                 if failed
                     % Mtimes has failed: reset LBFGS matrix
                     o.resetLBFGS();
@@ -203,10 +205,9 @@ classdef LBFGSSolver < solvers.NlpSolver
                 % Subspace minimization
                 if nFree == 0 || o.cl == 0
                     cgout = NaN;
-                    d = xc - x;
                     o.logger.debug('Skipping Subspace minimization');
                 else
-                    [d, cgit, cgout, failed] = o.subspaceMinimization(x, g, xc, c, indFree, nFree);
+                    [d, cgit, cgout, failed] = o.subspaceMinimization(x, g, d, indFree, nFree);
                     o.iterCg = o.iterCg + cgit;
                     if failed
                         % Mtimes has failed: reset LBFGS matrix
@@ -360,7 +361,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             breakpoints = max(breakpoints, 0);
         end
         
-        function [breakpoints, d, F, indFree] = cauchyDirection(o, x, g)
+        function d = cauchyDirection(o, g, indFree)
             %% CauchyDirection
             %  Compute the breakpoints along the projected gradient path
             %
@@ -378,28 +379,17 @@ classdef LBFGSSolver < solvers.NlpSolver
             %      - breakpoints: vector containing the breakpoints
             %      associated to each coordinate of g
             %      - d: the projected direction on the first segment
-            %      - F: the indices of the sorted positive breakpoints
             %      - indFree: the unexposed constraints at x
-            
-            % Compute breakpoints along the projected gradient path
-            breakpoints = o.brkpt(x, -g);
             
             % Compute a direction whose coordinates are zeros if the
             % associated constraints are exposed.
-            indFree = (abs(breakpoints) >= eps);
+            
             d = zeros(o.nlp.n, 1);
             d(indFree) = -g(indFree);
-            
-            % Compute the indices of the breakpoints sorted form the
-            % smallest breakpoint to the greatest
-            if nargout > 2
-                [~, F] = sort(breakpoints);
-                F = F(nnz(~indFree)+1:end);
-            end
         end
         
-        function [xc, c, indFree, nFree, alph, resetLBFGS] = cauchyB(o, x, g, alph)
-            %% CauchyB
+        function [step, indFree, nFree, alph, resetLBFGS] = cauchy(o, x, g, alph)
+            %% Cauchy
             %  Compute the Cauchy point by backtracking
 
             o.logger.debug('-- Entering Cauchy --');
@@ -407,24 +397,24 @@ classdef LBFGSSolver < solvers.NlpSolver
             interpf =  0.5;     % interpolation factor
             extrapf = 1 / interpf;     % extrapolation factor
             
-            % Compute the preconditioned descent
-            [breakpoints, p] = o.cauchyDirection(x, g); % p = -g !!!
+            % Compute breakpoints in the gradient direction
+            breakpoints = o.brkpt(x, -g);
+            indFree = (abs(breakpoints) >= eps);
+            brkptmax = max(breakpoints);
+            
+            % Compute the search direction
+            p = o.cauchyDirection(g, indFree); % p = -g !!!
             
             % Find the minimal and maximal break-point on x - alph*g.
-            brptMax = max(breakpoints);
-            o.logger.debug(sprintf('brptMax = %7.1e', brptMax));
-            alph = min(alph, brptMax);
+            o.logger.debug(sprintf('brptMax = %7.1e', brkptmax));
+            alph = min(alph, brkptmax);
             
             % Evaluate the initial alph and decide if the algorithm
             % must interpolate or extrapolate.
             step = o.gpstep(x, alph, p);
-            gts = g'*step;
+            gts = g' * step;
             [Bs, failed] = o.btimes(step);
             if failed
-                xc = x;
-                c = [];
-                indFree = [];
-                nFree = [];
                 resetLBFGS = true;
                 return
             end
@@ -439,13 +429,9 @@ classdef LBFGSSolver < solvers.NlpSolver
                     % will be replaced in future versions of the code.
                     alph = interpf * alph;
                     step = o.gpstep(x, alph, p);
-                    gts = g'*step;
+                    gts = g' * step;
                     [Bs, failed] = o.btimes(step);
                     if failed
-                        xc = x;
-                        c = [];
-                        indFree = [];
-                        nFree = [];
                         resetLBFGS = true;
                         return
                     end
@@ -458,7 +444,7 @@ classdef LBFGSSolver < solvers.NlpSolver
                 % Increase alph until a successful step is found.
                 alphs = alph;
                 iter = 1;
-                while alph <= brptMax && toc(o.solveTime) < o.maxRT...
+                while alph <= brkptmax && toc(o.solveTime) < o.maxRT...
                         && iter <= 100
                     % This is a crude extrapolation procedure that
                     % will be replaced in future versions of the code.
@@ -467,10 +453,6 @@ classdef LBFGSSolver < solvers.NlpSolver
                     gts = g' * step;
                     [Bs, failed] = o.btimes(step);
                     if failed
-                        xc = x;
-                        c = [];
-                        indFree = [];
-                        nFree = [];
                         resetLBFGS = true;
                         return
                     end
@@ -481,20 +463,18 @@ classdef LBFGSSolver < solvers.NlpSolver
                     iter = iter + 1;
                 end
                 % Recover the last successful step.
-                alph = alphs;
+                alph = min(alphs, brkptmax);
                 step = o.gpstep(x, alph, p);
             end
             % Prepare output
-            xc = x + step;
-            c = o.wtrtimes(step);
-            indFree = ~(xc == o.nlp.bL & p > 0) |...
-                (xc == o.nlp.bU & p < 0);
+            indFree = ~(x + step == o.nlp.bL & p > 0) |...
+                (x + step == o.nlp.bU & p < 0);
             nFree = nnz(indFree);
             resetLBFGS = false;
-            o.logger.debug(sprintf('Leaving Cauchy, α = %7.1e', alph));
+            o.logger.debug(sprintf('Leaving Cauchy, alpha = %7.1e', alph));
         end % cauchyBacktrack
 
-        function [s, iter, info, failed] = subspaceMinimization(o, x, g, xc, c, indFree, nFree)
+        function [s, iter, info, failed] = subspaceMinimization(o, x, g, s, indFree, nFree)
             %% SubspaceMinimization - Minimize the quadratic on the free subspace
             %  Find the solution of the problem
             %
@@ -510,31 +490,25 @@ classdef LBFGSSolver < solvers.NlpSolver
             
             iterMax = o.maxIterCg;
             iter = 0;
+            failed = false;
             
             % Initialize residual and descent direction
-            [Mc, failed] = o.mtimes(c);
-            if failed
-                s = [];
-                info = -1;
-                return
-            end
-            rc = g + o.theta * (xc - x) ...
-                - o.wtimes(Mc);
-            rc = rc(indFree);
-            normRc = norm(rc);
+            rc = g + o.btimes(s);
+            r = rc(indFree);
+            
+            % Check if initial point is the solution
+            normRc = norm(r);
             o.logger.debug(sprintf('||rc|| = %9.3e', normRc));
             
             if normRc <= o.aOptTol
-                s = xc - x;
                 info = 0;
                 o.logger.debug('Exit CG: xc is the solution');
                 return
             end
             
             epsilon = min(o.cgTol, sqrt(normRc)) * normRc;
-            r = rc;
-            p = -rc;
-            d = zeros(length(r),1);
+            p = -r;
+            d = zeros(nFree,1);
             rho2 = r .'* r;
             
             while true
@@ -558,7 +532,8 @@ classdef LBFGSSolver < solvers.NlpSolver
                     break;
                 end
                 % Compute the minimal breakpoint
-                %alf1 = min( o.brkpt(xc(indFree) + d, p, indFree, nFree) );
+                %alf1 = min( o.brkpt(x(indFree) + s(indFree) + d, ...
+                %    p, indFree, nFree) );
                 alf1 = Inf;
                 
                 % Compute step length
@@ -586,10 +561,13 @@ classdef LBFGSSolver < solvers.NlpSolver
                 beta = rho2 / rho1;
                 p = -r + beta * p;
             end
-            s = xc  -x;
-            alf1 = min( o.brkpt(xc(indFree), d, indFree, nFree) );
+            
+            % Find smallest breakpoint in the found direction
+            alf1 = min( o.brkpt(x(indFree) + s(indFree), ... 
+                d, indFree, nFree) );
             s(indFree) = s(indFree) + alf1 * d;
-            failed = false;
+            %s(indFree) = s(indFree) + d;
+            
             o.logger.debug(sprintf('||s|| = %9.3e', norm(s)));
             o.logger.debug(' -- Leaving Subspace minimization -- ');
         end
@@ -697,13 +675,13 @@ classdef LBFGSSolver < solvers.NlpSolver
         
         function [ys, yy] = dotProds(~, s, y)
             %% DotProds - Prepare the dot products y'y and y's
-            ys = dot(y, s);
-            yy = dot(y, y);
+            ys = y' * s;
+            yy = y' * y;
         end
         
         function dtd = updateW(o, s, y, ys, yy)
             %% UpdateW - Update ws, wy, theta and return s's
-            dtd = dot(s, s);
+            dtd = s' * s;
             o.ws(:,o.insert) = s;
             o.wy(:,o.insert) = y;
             o.theta = yy / ys;
@@ -821,8 +799,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             
             p(i2) = q(i2)   + o.l * (q(i1) ./ o.dd);
             
-            [p(i2), R] = linsolve(o.wt(i1,i1),  p(i2), ...
-                struct('UT', true, 'TRANSA', true));
+            [p(i2), R] = linsolve(o.wt(i1,i1),  p(i2), o.UPTR);
             
             if R < o.MINRCOND
                 % If the system is ill-conditioned, we leave
@@ -838,9 +815,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             %       [  0         J'           ] [ p2 ] = [ p2 ]
 
             % Solve J'p2 = p2
-            [p(i2), R] = linsolve(o.wt(i1, i1), ...
-                p(i2), ...
-                struct('UT', true));
+            [p(i2), R] = linsolve(o.wt(i1, i1),  p(i2), o.UP);
             if R < o.MINRCOND
                 % If the system is ill-conditioned, we leave
                 illCond = true;

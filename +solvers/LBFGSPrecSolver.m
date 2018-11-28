@@ -11,7 +11,7 @@ classdef LBFGSPrecSolver < solvers.LBFGSSolver
         
         %% Operations and constraints handling
         
-        function [breakpoints, d, F, indFree] = cauchyDirection(o, x, g)
+        function d = cauchyDirection(o, g, indFree)
             %% CauchyDirection
             %  Compute the breakpoints along the projected gradient path
             %
@@ -29,29 +29,19 @@ classdef LBFGSPrecSolver < solvers.LBFGSSolver
             %      - breakpoints: vector containing the breakpoints
             %      associated to each coordinate of g
             %      - d: the projected direction on the first segment
-            %      - F: the indices of the sorted positive breakpoints
             %      - indFree: the unexposed constraints at x
             
             % Compute breakpoints along the projected gradient path
-            breakpoints = o.brkpt(x, -g);
             
             % Compute a direction whose coordinates are zeros if the
             % associated constraints are exposed.
-            indFree = (abs(breakpoints) >= eps);
             d = zeros(o.nlp.n, 1);
             d(indFree) = -g(indFree);
             d = o.nlp.precTimes(d);
             d(~indFree) = 0;
-            
-            % Compute the indices of the breakpoints sorted form the
-            % smallest breakpoint to the greatest
-            if nargout > 2
-                [~, F] = sort(breakpoints);
-                F = F(nnz(~indFree)+1:end);
-            end
         end
 
-        function [s, iter, info, failed] = subspaceMinimization(o, x, g, xc, c, indFree, nFree)
+        function [s, iter, info, failed] = subspaceMinimization(o, x, g, s, indFree, nFree)
             %% SubspaceMinimization - Minimize the quadratic on the free subspace
             %  Find the solution of the problem
             %
@@ -67,23 +57,17 @@ classdef LBFGSPrecSolver < solvers.LBFGSSolver
             
             iterMax = o.maxIterCg;
             iter = 0;
+            failed = false;
             
             % Initialize residual and descent direction
-            [Mc, failed] = o.mtimes(c);
-            if failed
-                s = [];
-                info = -1;
-                return
-            end
-            rc = g + o.theta * (xc - x) ...
-                - o.wtimes(Mc);
+            rc = g + o.btimes(s);
             r = rc(indFree);
             
             % Check if initial point is the solution
             normRc = norm(r);
             o.logger.debug(sprintf('||rc|| = %9.3e', normRc));
+            
             if normRc <= o.aOptTol
-                s = xc - x;
                 info = 0;
                 o.logger.debug('Exit CG: xc is the solution');
                 return
@@ -92,7 +76,7 @@ classdef LBFGSPrecSolver < solvers.LBFGSSolver
             epsilon = min(o.cgTol, sqrt(normRc)) * normRc;
             z = o.nlp.precSubTimes(r, indFree);
             p = -z;
-            d = zeros(length(r),1);
+            d = zeros(nFree,1);
             rho2 = r .'* z;
             
             while true
@@ -116,7 +100,8 @@ classdef LBFGSPrecSolver < solvers.LBFGSSolver
                     break;
                 end
                 % Compute the minimal breakpoint
-                %alf1 = min( o.brkpt(xc(indFree) + d, p, indFree, nFree) );
+                %alf1 = min( o.brkpt(x(indFree) + s(indFree) + d, ...
+                %    p, indFree, nFree) );
                 alf1 = Inf;
                 
                 % Compute step length
@@ -145,11 +130,13 @@ classdef LBFGSPrecSolver < solvers.LBFGSSolver
                 beta = rho2 / rho1;
                 p = -z + beta * p;
             end
-            s = xc  -x;
-            alf1 = min( o.brkpt(xc(indFree), d, indFree, nFree) );
+            
+            % Find smallest breakpoint in the found direction
+            alf1 = min( o.brkpt(x(indFree) + s(indFree),...
+                d, indFree, nFree) );
             s(indFree) = s(indFree) + alf1 * d;
             %s(indFree) = s(indFree) + d;
-            failed = false;
+            
             o.logger.debug(sprintf('||s|| = %9.3e', norm(s)));
             o.logger.debug(' -- Leaving Subspace minimization -- ');
         end
