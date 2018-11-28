@@ -157,81 +157,19 @@ classdef LBFGSPrecSolver < solvers.LBFGSSolver
         
         %% L-BFGS operations
         
-        function failed = updateLBFGS(o, s, y)
-            %% UpdateLBFGS - Add a new pair to the pseudohessian
-            % Store the new pair {y, s} into the L-BFGS approximation
-            % Discard the oldest pair if memory has been exceeded
-            % The matrices D, L, StS and J are also updated
-            
-            o.logger.debug('-- Entering updateLBFGS --');
-            
+        function [ys, yy] = dotProds(o, s, y)
+            %% DotProds - Prepare the dot products y'H0y and y's
             ys = dot(y, s);
-            yH0y = dot(y, o.nlp.precTimes(y));
-            
-            if ys <= eps * max(yH0y, 1)
-                o.logger.debug('L-BFGS: Rejecting {s, y} pair');
-                o.nrejects = o.nrejects + 1;
-                o.iReject = o.iReject + 1;
-                if o.iReject >= 2
-                    o.iReject = 0;
-                    failed = true;
-                else
-                    failed = false;
-                end
-                return
-            end
-            
+            yy = dot(y, o.nlp.precTimes(y));
+        end
+        
+        function dtd = updateW(o, s, y, ys, yy)
+            %% UpdateW - Update ws, wy, theta and return s'B0s
             B0s = o.nlp.precDiv(s);
-            stB0s = dot(s, B0s);
-            
-            % Set the column indices where to put the new pairs
-            if o.cl < o.mem
-                o.cl = o.cl + 1;
-                o.insert = mod(o.hd + o.cl - 2, o.mem) + 1;
-            else
-                o.insert = mod(o.insert, o.mem) + 1;
-                o.hd = mod(o.hd, o.mem) + 1;
-                
-                % Move old information in sy and ss
-                o.ss(o.triup) = o.ss(o.tridown);
-                o.sy(o.triup') = o.sy(o.tridown');
-            end
-            
-            % Update S and Y matrices and the scaling factor theta
+            dtd = dot(s, B0s);
             o.ws(:,o.insert) = B0s;
             o.wy(:,o.insert) = y;
-            o.theta = yH0y / ys;
-            o.iprs = mod(o.hd - 1 : o.hd + o.cl - 2, o.mem) + 1;
-            
-            % Add new information in sy and ss
-            o.sy(o.cl,1:o.cl-1) = s.' * o.wy(:,o.iprs(1:end-1));
-            o.ss(1:o.cl-1,o.cl) = o.ws(:,o.iprs(1:end-1)).' * s;
-            
-            o.ss(o.cl,o.cl) = stB0s;
-            o.sy(o.cl,o.cl) = ys;
-            o.l  = tril(o.sy(1:o.cl,1:o.cl), -1);
-            o.dd = diag(o.sy(1:o.cl,1:o.cl));
-            
-            
-            % Compute the Cholesky factorization 
-            % of T = theta * ss + L * D^(-1) * L' and store it
-            % in the upper triangle of wt.
-            o.wt(1:o.cl,1:o.cl) = ...
-                o.theta * o.ss(1:o.cl,1:o.cl) ...
-                + o.l * ...
-                ( spdiags(o.dd, 0, o.cl, o.cl) \ ...
-                o.l.' );
-            
-            [tmp, p] = chol(o.wt(1:o.cl,1:o.cl));
-            if p > 0
-                % The Cholesky factorization has failed
-                failed = true;
-                return
-            end
-            
-            o.wt(1:o.cl,1:o.cl) = tmp;
-            
-            failed = false;
+            o.theta = yy / ys;
         end
         
         function [v, failed] = btimes(o, v, ind)

@@ -827,6 +827,20 @@ classdef LBFGSSolver < solvers.NlpSolver
             o.iprs = 0;
         end
         
+        function [ys, yy] = dotProds(~, s, y)
+            %% DotProds - Prepare the dot products y'y and y's
+            ys = dot(y, s);
+            yy = dot(y, y);
+        end
+        
+        function dtd = updateW(o, s, y, ys, yy)
+            %% UpdateW - Update ws, wy, theta and return s's
+            dtd = dot(s, s);
+            o.ws(:,o.insert) = s;
+            o.wy(:,o.insert) = y;
+            o.theta = yy / ys;
+        end
+        
         function failed = updateLBFGS(o, s, y)
             %% UpdateLBFGS - Add a new pair to the pseudohessian
             % Store the new pair {y, s} into the L-BFGS approximation
@@ -835,8 +849,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             
             o.logger.debug('-- Entering updateLBFGS --');
             
-            ys = dot(y, s);
-            yy = dot(y, y);
+            [ys, yy] = o.dotProds(s, y);
             
             if ys <= eps * max(yy, 1)
                 o.logger.debug('L-BFGS: Rejecting {s, y} pair');
@@ -850,8 +863,6 @@ classdef LBFGSSolver < solvers.NlpSolver
                 end
                 return
             end
-            
-            dtd = dot(s, s);
             
             % Set the column indices where to put the new pairs
             if o.cl < o.mem
@@ -868,9 +879,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             
             
             % Update S and Y matrices and the scaling factor theta
-            o.ws(:,o.insert) = s;
-            o.wy(:,o.insert) = y;
-            o.theta = yy / ys;
+            dtd = o.updateW(s, y, ys, yy);
             o.iprs = mod(o.hd - 1 : o.hd + o.cl - 2, o.mem) + 1;
             
             % Add new information in sy and ss
