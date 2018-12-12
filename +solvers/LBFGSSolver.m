@@ -39,17 +39,17 @@ classdef LBFGSSolver < solvers.NlpSolver
         l;        % L matrix of the compact L-BFGS Formula
         dd;       % diagonal of the D matrix of the compact L-BFGS formula
         iprs      % indices of the current pairs
-        triup     % Used to move information in arrays
-        tridown   % 
         iReject;  % Number of successive step rejections
+        TRIUP;
+        TRIDOWN;
     end
     
     properties (Hidden = true, Constant)
         % Minimal accepted condition number
         MINRCOND = eps;
+        % Parameters for system solving in mtimes
         UP = struct('UT', true);
-        UPTR = struct('UT', true, 'TRANSA', true);
-        
+        UPTR = struct('UT', true, 'TRANSA', true);        
         % Log header and body formats.
         LOG_HEADER_FORMAT = '\n%5s  %13s  %13s  %13s  %4s  %5s  %9s  %4s  %9s\n';
         LOG_BODY_FORMAT = ['%5i  %13.6e  %13.6e  %13.6e  %4i  %5i', ...
@@ -96,14 +96,12 @@ classdef LBFGSSolver < solvers.NlpSolver
             o.mu0       = p.Results.mu0;
             
             % Initialize the L-BFGS operator
-            o.initLBFGS();
+            o.initLBFGS();                         
             
-            % Init triup and tridown
-            o.triup = [triu(true(o.mem-1,o.mem-1)), false(o.mem-1,1); ...
+            o.TRIUP = [triu(true(o.mem-1,o.mem-1)), false(o.mem-1,1); ...
                        false(1,o.mem)];
-            o.tridown = [ false(1,o.mem); ...
+            o.TRIDOWN = [ false(1,o.mem); ...
                 false(o.mem-1,1), triu(true(o.mem-1,o.mem-1))];
-                         
             
             import utils.PrintInfo;
         end % constructor
@@ -474,7 +472,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             o.logger.debug(sprintf('Leaving Cauchy, alpha = %7.1e', alph));
         end % cauchyBacktrack
 
-        function [s, iter, info, failed] = subspaceMinimization(o, x, g, s, indFree, nFree)
+        function [s, iter, flag, failed] = subspaceMinimization(o, x, g, s, indFree, nFree)
             %% SubspaceMinimization - Minimize the quadratic on the free subspace
             %  Find the solution of the problem
             %
@@ -487,80 +485,15 @@ classdef LBFGSSolver < solvers.NlpSolver
             %         3 - Maximum solve time reached
             
             o.logger.debug('-- Entering Subspace minimization --');
-            
-            iterMax = o.maxIterCg;
-            iter = 0;
             failed = false;
             
             % Initialize residual and descent direction
             rc = g + o.btimes(s);
             r = rc(indFree);
-            
-            % Check if initial point is the solution
             normRc = norm(r);
-            o.logger.debug(sprintf('||rc|| = %9.3e', normRc));
             
-            if normRc <= o.aOptTol
-                info = 0;
-                o.logger.debug('Exit CG: xc is the solution');
-                return
-            end
-            
-            epsilon = min(o.cgTol, sqrt(normRc)) * normRc;
-            p = -r;
-            d = zeros(nFree,1);
-            rho2 = r .'* r;
-            
-            while true
-                iter = iter + 1;
-                
-                % Check exit condition
-                if sqrt(rho2) < epsilon
-                    info = 0;
-                    o.logger.debug(sprintf('||r|| = %9.3e', sqrt(rho2)));
-                    o.logger.debug('Exit CG: Convergence');
-                    break;
-                end
-                if iter > iterMax
-                    info = 2;
-                    o.logger.debug('Exit CG: Max iteration number reached');
-                    break;
-                end
-                if toc(o.solveTime) > o.maxRT
-                    info = 3;
-                    o.logger.debug('Exit CG: Max runtime reached');
-                    break;
-                end
-                % Compute the minimal breakpoint
-                %alf1 = min( o.brkpt(x(indFree) + s(indFree) + d, ...
-                %    p, indFree, nFree) );
-                alf1 = Inf;
-                
-                % Compute step length
-                [q, failed] = o.btimes(p, indFree);
-                if failed
-                    s = [];
-                    info = -1;
-                    return
-                end
-                alf2 = rho2 / (p.' * q);
-                
-                % Exit if we hit the domain boundary
-                if alf2 > alf1
-                    d = d + alf1 * p;
-                    info = 1;
-                    o.logger.debug('Exit CG: Constraints violated');
-                    break;
-                end
-                
-                % Prepare new step
-                d = d + alf2 * p;
-                r = r + alf2 * q;
-                rho1 = rho2;
-                rho2 = (r.' * r);
-                beta = rho2 / rho1;
-                p = -r + beta * p;
-            end
+            [d, flag, ~, iter] = pcg(@(v)o.btimes(v, indFree), -r, ...
+                min(o.cgTol, sqrt(normRc)), o.maxIterCg);
             
             % Find smallest breakpoint in the found direction
             alf1 = min( o.brkpt(x(indFree) + s(indFree), ... 
@@ -719,8 +652,8 @@ classdef LBFGSSolver < solvers.NlpSolver
                 o.hd = mod(o.hd, o.mem) + 1;
                 
                 % Move old information in sy and ss
-                o.ss(o.triup) = o.ss(o.tridown);
-                o.sy(o.triup') = o.sy(o.tridown');
+                o.ss(o.TRIUP) = o.ss(o.TRIDOWN);
+                o.sy(o.TRIUP') = o.sy(o.TRIDOWN');
             end
             
             
