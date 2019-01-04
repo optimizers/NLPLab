@@ -125,7 +125,6 @@ classdef BcflashPrecSolver < solvers.BcflashSolver
                 
                 Hfree = H(indFree, indFree);
                 
-                
                 [w, iterTR, infoTR] = self.trpcg(Hfree, gQuad, indFree, ...
                     delta, tol, self.maxIterCg, s(indFree));
                 iters = iters + iterTR;
@@ -144,7 +143,6 @@ classdef BcflashPrecSolver < solvers.BcflashSolver
                 Hs = H * s;
                 newwa = (wa + Hs(indFree));
                 normWa = newwa.' * self.nlp.precSubTimes(newwa, indFree);
-                
                 
                 % Convergence and termination test.
                 % We terminate if the preconditioned conjugate gradient
