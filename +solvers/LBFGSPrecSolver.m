@@ -68,9 +68,7 @@ classdef LBFGSPrecSolver < solvers.LBFGSSolver
             % Find smallest breakpoint in the found direction
             alf1 = min( o.brkpt(x(indFree) + s(indFree), ... 
                 d, indFree, nFree) );
-            s(indFree) = s(indFree) + alf1 * d;
-            %s(indFree) = s(indFree) + d;
-            
+            s(indFree) = s(indFree) + alf1 * d;            
             o.logger.debug(sprintf('||s|| = %9.3e', norm(s)));
             o.logger.debug(' -- Leaving Subspace minimization -- ');
         end

@@ -9,7 +9,6 @@ classdef LBFGSSolver < solvers.NlpSolver
         fMin;
         fid; % File ID of where to direct log output
         boxed;
-        cnstnd;
         
         % Linesearch parameters
         fSuffDec;
@@ -92,7 +91,6 @@ classdef LBFGSSolver < solvers.NlpSolver
             o.maxIterLS = p.Results.maxIterLS;
             o.mem  = max(p.Results.mem, 1);
             o.boxed = all(nlp.jTwo);
-            o.cnstnd = any(nlp.jUpp | nlp.jLow);
             o.mu0       = p.Results.mu0;
             
             % Initialize the L-BFGS operator
@@ -219,7 +217,6 @@ classdef LBFGSSolver < solvers.NlpSolver
                 o.logger.trace(['xmin = ', sprintf('%9.2e  ', x + d)]);
                 
                 % Line search
-
                 dg = dot(d, g);
                 if dg > -eps
                     % This is not a descent direction: restart iteration
@@ -335,6 +332,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             %      - w: the search direction
             %      - ind: the reduced indices set, in case we use reduced
             %      variables (optional)
+            %      - nfree: the number of free variables
             %  Output:
             %      - breakpoints: the vector containing the breakpoint for
             %      each coordinate
@@ -371,13 +369,8 @@ classdef LBFGSSolver < solvers.NlpSolver
             %  breakpoints.
             %  
             %  Inputs:
-            %      - x: the point where we evaluate the gradient
             %      - g: the gradient of the objective function at x
-            %  Outputs:
-            %      - breakpoints: vector containing the breakpoints
-            %      associated to each coordinate of g
-            %      - d: the projected direction on the first segment
-            %      - indFree: the unexposed constraints at x
+            %      - indFree: the set of free indices
             
             % Compute a direction whose coordinates are zeros if the
             % associated constraints are exposed.
@@ -479,7 +472,7 @@ classdef LBFGSSolver < solvers.NlpSolver
             %        min 1/2*s'*B*s + g'*s  s.t. s(~indFree) = (xc - x)(~indFree)
             %
             %  The solution is found by conjugate gradient
-            %  Info : 0 - Convergence
+            %  Flag : 0 - Convergence
             %         1 - Constraints are violated
             %         2 - Maximum number of iteration reached
             %         3 - Maximum solve time reached
