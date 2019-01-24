@@ -24,7 +24,6 @@ classdef LbfgsbSolver < solvers.NlpSolver
         LOG_HEADER = {};
     end % constant properties
     
-    
     methods (Access = public)
         
         function self = LbfgsbSolver(nlp, varargin)
@@ -178,5 +177,4 @@ classdef LbfgsbSolver < solvers.NlpSolver
         end
         
     end % hidden public methods
-    
 end % class
