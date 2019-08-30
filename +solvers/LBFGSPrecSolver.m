@@ -4,14 +4,15 @@ classdef LBFGSPrecSolver < solvers.LBFGSSolver
        
     methods (Access = public)
         
-        function o = LBFGSPrecSolver(nlp, varargin)
+        function self = LBFGSPrecSolver(nlp, varargin)
             %% Constructor
-            o = o@solvers.LBFGSSolver(nlp, varargin{:});
+            self = self@solvers.LBFGSSolver(nlp, varargin{:});
+            self.inexcauchy = true; % Ensure we use the inexact Cauchy search
         end % constructor
         
         %% Operations and constraints handling
         
-        function d = cauchyDirection(o, g, indFree)
+        function [breakpoints, d, F, indFree] = cauchyDirection(self, x, g)
             %% CauchyDirection
             %  Compute the breakpoints along the projected gradient path
             %
@@ -21,102 +22,163 @@ classdef LBFGSPrecSolver < solvers.LBFGSSolver
             %  the indices of the positive breakpoints in this direction
             %  sorted from the smallest breakpoints to the greatest
             %  breakpoints.
-            %  
+            %
             %  Inputs:
-            %      - x: the point where we evaluate the gradient
             %      - g: the gradient of the objective function at x
-            %  Outputs:
-            %      - breakpoints: vector containing the breakpoints
-            %      associated to each coordinate of g
-            %      - d: the projected direction on the first segment
-            %      - indFree: the unexposed constraints at x
-            
+            %      - indFree: the set of free indices
+
             % Compute breakpoints along the projected gradient path
-            
+            breakpoints = self.brkpt(x, -g);
+
             % Compute a direction whose coordinates are zeros if the
             % associated constraints are exposed.
-            d = zeros(o.nlp.n, 1);
+            indFree = (abs(breakpoints) >= eps);
+            d = zeros(self.nlp.n, 1);
             d(indFree) = -g(indFree);
-            d = o.nlp.precTimes(d);
+            d = self.nlp.precTimes(d);
             d(~indFree) = 0;
-        end
 
-        function [s, iter, flag, failed] = subspaceMinimization(o, x, g, s, indFree, nFree)
+            if nargout > 2
+                [~, F] = sort(breakpoints);
+                F = F(nnz(~indFree)+1:end);
+            end
+        end
+        
+        function [s, iter, flag, failed] = subspaceMinimization(self, x, g, xc, c, indFree, nFree)
             %% SubspaceMinimization - Minimize the quadratic on the free subspace
             %  Find the solution of the problem
             %
             %        min 1/2*s'*B*s + g'*s  s.t. s(~indFree) = (xc - x)(~indFree)
             %
             %  The solution is found by conjugate gradient
-            %  Info : 0 - Convergence
+            %  Flag : 0 - Convergence
             %         1 - Constraints are violated
             %         2 - Maximum number of iteration reached
             %         3 - Maximum solve time reached
-            
-            o.logger.debug('-- Entering Subspace minimization --');
-            failed = false;
-            
+
+            self.logger.debug('-- Entering Subspace minimization --');
+
+            iterMax = self.maxcgiter;
+            iter = 0;
+
             % Initialize residual and descent direction
-            rc = g + o.btimes(s);
+            [Mc, failed] = self.mtimes(c);
+            if failed
+                s = [];
+                flag = -1;
+                return
+            end
+            rc = g + self.theta * (xc - x) ...
+                - self.wtimes(Mc);
             r = rc(indFree);
             normRc = norm(r);
-            
-            [d, flag, ~, iter] = pcg(@(v)o.btimes(v, indFree), -r, ...
-                min(o.cgTol, sqrt(normRc)), o.maxIterCg, ...
-                @(v)o.nlp.precSubTimes(v, indFree));
-            
-            % Find smallest breakpoint in the found direction
-            alf1 = min( o.brkpt(x(indFree) + s(indFree), ... 
-                d, indFree, nFree) );
-            s(indFree) = s(indFree) + alf1 * d;            
-            o.logger.debug(sprintf('||s|| = %9.3e', norm(s)));
-            o.logger.debug(' -- Leaving Subspace minimization -- ');
+            self.logger.debug(sprintf('||rc|| = %9.3e', normRc));
+
+            if normRc <= self.aOptTol
+                s = xc - x;
+                flag = 0;
+                self.logger.debug('Exit CG: xc is the solution');
+                return
+            end
+
+            epsilon = min(self.cgtol, sqrt(normRc)) * normRc;
+            z = self.nlp.precSubTimes(r, indFree);
+            p = -z;
+            d = zeros(length(r),1);
+            rho2 = r .' * z;
+
+            while true
+                iter = iter + 1;
+
+                % Check exit condition
+                if sqrt(rho2) < epsilon
+                    flag = 0;
+                    self.logger.debug(sprintf('||r|| = %9.3e', sqrt(rho2)));
+                    self.logger.debug('Exit CG: Convergence');
+                    break;
+                end
+                if iter > iterMax
+                    flag = 2;
+                    self.logger.debug('Exit CG: Max iteration number reached');
+                    break;
+                end
+                if toc(self.solveTime) > self.maxRT
+                    flag = 3;
+                    self.logger.debug('Exit CG: Max runtime reached');
+                    break;
+                end
+
+                % Compute step length
+                [q, failed] = self.btimes(p, indFree);
+                if failed
+                    s = [];
+                    flag = -1;
+                    return
+                end
+                alf = rho2 / (p.' * q);
+
+                % Prepare new step
+                d = d + alf * p;
+                r = r + alf * q;
+                z = self.nlp.precSubTimes(r, indFree);
+                rho1 = rho2;
+                rho2 = (r.' * z);
+                beta = rho2 / rho1;
+                p = -z + beta * p;
+            end
+
+            s = xc - x;
+            alf = min( self.brkpt(xc(indFree), d, indFree, nFree) );
+            s(indFree) = s(indFree) + min(alf, 1) * d;
+            failed = false;
+            self.logger.debug(sprintf('||s|| = %9.3e', norm(s)));
+            self.logger.debug(' -- Leaving Subspace minimization -- ');
         end
-        
+
         %% L-BFGS operations
         
-        function [ys, yy] = dotProds(o, s, y)
+        function [ys, yy] = dotProds(self, s, y)
             %% DotProds - Prepare the dot products y'H0y and y's
             ys = dot(y, s);
-            yy = dot(y, o.nlp.precTimes(y));
+            yy = dot(y, self.nlp.precTimes(y));
         end
         
-        function dtd = updateW(o, s, y, ys, yy)
+        function dtd = updateW(self, s, y, ys, yy)
             %% UpdateW - Update ws, wy, theta and return s'B0s
-            B0s = o.nlp.precDiv(s);
+            B0s = self.nlp.precDiv(s);
             dtd = dot(s, B0s);
-            o.ws(:,o.insert) = B0s;
-            o.wy(:,o.insert) = y;
-            o.theta = yy / ys;
+            self.ws(:,self.insert) = B0s;
+            self.wy(:,self.insert) = y;
+            self.theta = min(yy / ys, 1);
         end
         
-        function [v, failed] = btimes(o, v, ind)
+        function [v, failed] = btimes(self, v, ind)
             %% BTimes - Apply the pseudohessian
             %  Compute the product by the L-BFGS hessian approximation
-            if o.cl > 0
+            if self.col > 0
                 if nargin < 3
-                    p = o.wtrtimes(v);
-                    [p, failed] = o.mtimes(p);
+                    p = self.wtrtimes(v);
+                    [p, failed] = self.mtimes(p);
                     if failed
                         % The Mtimes function has returned an error
                         return
                     end
-                    v = o.theta * o.nlp.precDiv(v) - o.wtimes(p);
+                    v = self.theta * self.nlp.precDiv(v) - self.wtimes(p);
                 else % Reduced vectors
-                    p = o.wtrtimes(v, ind);
-                    [p, failed] = o.mtimes(p);
+                    p = self.wtrtimes(v, ind);
+                    [p, failed] = self.mtimes(p);
                     if failed
                         % The Mtimes function has returned an error
                         return
                     end
-                    v = o.theta * o.nlp.precSubDiv(v, ind) ...
-                        - o.wtimes(p, ind);
+                    v = self.theta * self.nlp.precSubDiv(v, ind) ...
+                        - self.wtimes(p, ind);
                 end
             else
                 if nargin < 3
-                    v = o.theta * o.nlp.precDiv(v);
+                    v = self.theta * self.nlp.precDiv(v);
                 else
-                     v = o.theta * o.nlp.precSubDiv(v, ind);
+                     v = self.theta * self.nlp.precSubDiv(v, ind);
                 end
             end
             failed = false;
@@ -127,8 +189,8 @@ classdef LBFGSPrecSolver < solvers.LBFGSSolver
     
     methods (Access = public, Hidden = true)
         
-        function printf(o, varargin)
-            fprintf(o.fid, varargin{:});
+        function printf(self, varargin)
+            fprintf(self.fid, varargin{:});
         end
         
     end % hidden public methods

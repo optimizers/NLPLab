@@ -5,14 +5,17 @@ classdef BcflashPrecSolver < solvers.BcflashSolver
     %  descent directions for the cauchy point and the conjugate gradient
     %  are transformed through the use of a preconditioner.
     %
-    %  The model must contain the following methods
+    %  The model must contain a property named
     %
-    %        * precTimes
-    %        * precSubTimes
+    %        * M,
     %
-    %  to compute either the product of a vector by the
-    %  preconditioner (y = M * x) or by its principal submatrices
-    %  (w = M(ind,ind) * v).
+    %  that is a matrix or an opSpot operator corresponding to an
+    %  approximation of the inverse hessian.
+    %  
+    %  If p is the unpreconditioned direction (e.g. the opposite of the
+    %  gradient), the preconditioned direction is
+    %  
+    %        d = M * p
     %
     %  This algorithm also has embedded logging, through the use of the
     %  loggin4matlab package, available at

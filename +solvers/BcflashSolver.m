@@ -10,6 +10,7 @@ classdef BcflashSolver < solvers.NlpSolver
         maxIterCg; % maximum number of CG iters per Newton step
         nSuccessIter; % number of successful iters
         iterCg; % total number of CG iters
+        iterCauchy;
         mu0; % sufficient decrease parameter
         cgTol;
         fMin;
@@ -108,12 +109,14 @@ classdef BcflashSolver < solvers.NlpSolver
             [f, g] = self.nlp.obj(x);
             
             % Initialize stopping tolerance and initial TR radius
-            gNorm = norm(g);
-            delta = gNorm;
-            self.gNorm0 = gNorm;
-            rOptTol = self.rOptTol * gNorm;
+            pgNorm = norm(self.gpstep(x, -1, g));
+            self.gNorm0 = pgNorm;
+            rOptTol = self.rOptTol * pgNorm;
             rFeasTol = self.rFeasTol * abs(f);
             
+            gNorm = norm(g);
+            delta = max(1, gNorm);
+
             % Actual and predicted reductions. Initial inf value prevents
             % exits based on related on first iter.
             actRed = inf;
@@ -122,6 +125,7 @@ classdef BcflashSolver < solvers.NlpSolver
             % Miscellaneous iter
             alphc = 1;
             status = '';
+            self.iterCauchy = 0;
             
             %% Main loop
             while ~self.iStop
@@ -166,7 +170,8 @@ classdef BcflashSolver < solvers.NlpSolver
                 H = self.nlp.hobj(x);
                 
                 % Cauchy step
-                [alphc, s] = self.cauchy(H, x, g, delta, alphc);
+                [alphc, s, cauchyIter] = self.cauchy(H, x, g, delta, alphc);
+                self.iterCauchy = self.iterCauchy + cauchyIter;
                 
                 % Projected Newton step
                 [x, s] = self.spcg(H, x, g, delta, s);
@@ -177,7 +182,7 @@ classdef BcflashSolver < solvers.NlpSolver
                 backtrackAttempted = false;
                 while true
                     % Predicted reduction
-                    Hs = self.nlp.hobjprod(x, [], s);
+                    Hs = H * s;
                     preRed = -(s' * g + 0.5 * s' * Hs);
                     % Actual reduction
                     actRed = fc - f;
@@ -272,7 +277,7 @@ classdef BcflashSolver < solvers.NlpSolver
             end
         end
         
-        function [alph, s] = cauchy(self, H, x, g, delta, alph)
+        function [alph, s, iter] = cauchy(self, H, x, g, delta, alph)
             %% Cauchy
             % This subroutine computes a Cauchy step that satisfies a trust
             % region constraint and a sufficient decrease condition.
@@ -323,6 +328,7 @@ classdef BcflashSolver < solvers.NlpSolver
             if interp
                 self.logger.debug('Interpolating');
                 % Reduce alph until a successful step is found.
+                iter = 2;
                 while (toc(self.solveTime) < self.maxRT)
                     % This is a crude interpolation procedure that
                     % will be replaced in future versions of the code.
@@ -336,12 +342,13 @@ classdef BcflashSolver < solvers.NlpSolver
                             break
                         end
                     end
+                    iter = iter + 1;
                 end
             else
                 self.logger.debug('Extrapolating');
                 % Increase alph until a successful step is found.
                 alphs = alph;
-                iter = 1;
+                iter = 2;
                 while (alph <= brptMax) && ...
                         (toc(self.solveTime) < self.maxRT) && ...
                         iter <= self.maxExtraIter
